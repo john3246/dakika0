@@ -7,7 +7,8 @@ const isProduction = process.env.NODE_ENV === 'production';
 const poolConfig = process.env.DATABASE_URL
   ? {
       connectionString: process.env.DATABASE_URL,
-      ssl: isProduction ? { rejectUnauthorized: false } : false,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 20000, // 20s to handle Neon cold starts gracefully
     }
   : {
       database: process.env.DB_NAME,
