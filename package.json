@@ -1,0 +1,25 @@
+{
+  "name": "dakika0",
+  "version": "1.0.0",
+  "description": "Dakika0 is a corporate-level, professional Flutter application designed for P2P delivery services. It features a modern design system using Mint Green and Navy Blue, supporting both Light and Dark modes.",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.21.0"
+  }
+}

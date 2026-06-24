@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dakika0 - Super Admin Portal</title>
+  
+  <!-- Font and icons -->
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Leaflet CSS for Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Login Overlay -->
+  <div id="login-overlay" class="overlay">
+    <div class="login-card glass">
+      <div class="login-logo">
+        <i class="fa-solid fa-bolt logo-icon"></i>
+        <h2>Dakika<span>0</span></h2>
+        <p>Super Admin Access</p>
+      </div>
+      <form id="login-form">
+        <div class="input-group">
+          <i class="fa-solid fa-envelope"></i>
+          <input type="email" id="login-email" placeholder="Admin Email" required>
+        </div>
+        <div class="input-group">
+          <i class="fa-solid fa-lock"></i>
+          <input type="password" id="login-password" placeholder="Password" required>
+        </div>
+        <div id="login-error" class="error-msg hide">Invalid email or password</div>
+        <button type="submit" class="btn btn-primary btn-block">
+          <span>Login Securely</span>
+          <i class="fa-solid fa-arrow-right-to-bracket"></i>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App Layout -->
+  <div id="app-layout" class="layout hide">
+    
+    <!-- Sidebar -->
+    <aside class="sidebar glass">
+      <div class="sidebar-brand">
+        <i class="fa-solid fa-bolt brand-icon"></i>
+        <h1>Dakika<span>0</span></h1>
+      </div>
+      
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-tab="dashboard">
+          <i class="fa-solid fa-chart-line"></i>
+          <span>Dashboard</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="users">
+          <i class="fa-solid fa-users"></i>
+          <span>Users Manager</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="verifications">
+          <i class="fa-solid fa-id-card"></i>
+          <span>Verifications</span>
+          <span id="badge-verifications" class="badge bg-gold hide">0</span>
+        </a>
+        <a href="#" class="nav-item" data-tab="orders">
+          <i class="fa-solid fa-boxes-packing"></i>
+          <span>All Orders</span>
+        </a>
+      </nav>
+
+      <!-- Active Couriers Widget -->
+      <div class="active-couriers-widget">
+        <h3><i class="fa-solid fa-circle-dot color-green"></i> Online Couriers</h3>
+        <div id="online-couriers-list" class="couriers-list-scroll">
+          <p class="empty-list">No couriers online</p>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="admin-profile">
+          <div class="avatar">SA</div>
+          <div class="profile-details">
+            <h4 id="admin-name">Super Admin</h4>
+            <p id="admin-role">Super Admin</p>
+          </div>
+        </div>
+        <button id="btn-logout" class="btn btn-logout" title="Log Out">
+          <i class="fa-solid fa-power-off"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <header class="main-header glass">
+        <div class="header-search">
+          <h2>Super Admin Console</h2>
+        </div>
+        <div class="header-actions">
+          <div class="connection-status" id="ws-status">
+            <span class="status-dot offline"></span>
+            <span class="status-text">Disconnected</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Stats Summary Strip -->
+      <section class="stats-strip">
+        <div class="stat-card glass">
+          <div class="stat-icon bg-navy-light"><i class="fa-solid fa-users"></i></div>
+          <div class="stat-info">
+            <span class="stat-label">Total Users</span>
+            <h3 id="stat-total-users">0</h3>
+          </div>
+        </div>
+        <div class="stat-card glass">
+          <div class="stat-icon bg-green-light"><i class="fa-solid fa-truck-delivery"></i></div>
+          <div class="stat-info">
+            <span class="stat-label">Verified Couriers</span>
+            <h3 id="stat-verified-couriers">0</h3>
+          </div>
+        </div>
+        <div class="stat-card glass">
+          <div class="stat-icon bg-gold-light"><i class="fa-solid fa-hourglass-half"></i></div>
+          <div class="stat-info">
+            <span class="stat-label">Pending Verifies</span>
+            <h3 id="stat-pending-verifies">0</h3>
+          </div>
+        </div>
+        <div class="stat-card glass">
+          <div class="stat-icon bg-blue-light"><i class="fa-solid fa-spinner"></i></div>
+          <div class="stat-info">
+            <span class="stat-label">Active Orders</span>
+            <h3 id="stat-active-orders">0</h3>
+          </div>
+        </div>
+        <div class="stat-card glass">
+          <div class="stat-icon bg-purple-light"><i class="fa-solid fa-hand-holding-dollar"></i></div>
+          <div class="stat-info">
+            <span class="stat-label">Total Revenue</span>
+            <h3 id="stat-revenue">TZS 0</h3>
+          </div>
+        </div>
+      </section>
+
+      <!-- Content Tabs -->
+      <div class="tab-content-wrapper">
+        
+        <!-- Tab: Dashboard (Map + Logs) -->
+        <div id="tab-dashboard" class="tab-pane active">
+          <div class="dashboard-grid">
+            <div class="map-container-card glass">
+              <div class="card-header">
+                <h3><i class="fa-solid fa-map-location-dot"></i> Live Tracking & Operations Map</h3>
+              </div>
+              <div class="card-body">
+                <div id="live-map"></div>
+              </div>
+            </div>
+            
+            <div class="realtime-logs-card glass">
+              <div class="card-header">
+                <h3><i class="fa-solid fa-terminal"></i> Real-time System Event Log</h3>
+              </div>
+              <div id="logs-console" class="card-body console">
+                <div class="log-entry system"><span class="time">[System]</span> Log initialized. Waiting for events...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Users Manager -->
+        <div id="tab-users" class="tab-pane">
+          <div class="card glass">
+            <div class="card-header">
+              <h3><i class="fa-solid fa-users-gear"></i> Users & Role Management</h3>
+            </div>
+            <div class="card-body overflow-x">
+              <table class="admin-table" id="table-users">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Joined At</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Verifications -->
+        <div id="tab-verifications" class="tab-pane">
+          <div class="card glass">
+            <div class="card-header">
+              <h3><i class="fa-solid fa-id-card-clip"></i> Courier Verification Applications</h3>
+            </div>
+            <div class="card-body overflow-x">
+              <table class="admin-table" id="table-verifications">
+                <thead>
+                  <tr>
+                    <th>Courier Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>NIDA Number</th>
+                    <th>Vehicle Details</th>
+                    <th>Documents</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: All Orders -->
+        <div id="tab-orders" class="tab-pane">
+          <div class="card glass">
+            <div class="card-header">
+              <h3><i class="fa-solid fa-boxes-stacked"></i> All Order Transactions</h3>
+            </div>
+            <div class="card-body overflow-x">
+              <table class="admin-table" id="table-orders">
+                <thead>
+                  <tr>
+                    <th>Order ID</th>
+                    <th>Customer</th>
+                    <th>Courier</th>
+                    <th>Pickup</th>
+                    <th>Dropoff</th>
+                    <th>Item Type</th>
+                    <th>Weight</th>
+                    <th>Fee</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Filled via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Document Viewer Modal -->
+  <div id="document-modal" class="modal hide">
+    <div class="modal-content glass">
+      <div class="modal-header">
+        <h3>Courier Verification Materials</h3>
+        <button id="close-modal-btn" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body doc-grid">
+        <div class="doc-card">
+          <h4>NIDA ID Document</h4>
+          <div id="nida-doc-container" class="doc-img-container">
+            <p>No document uploaded</p>
+          </div>
+        </div>
+        <div class="doc-card">
+          <h4>Selfie Document</h4>
+          <div id="selfie-doc-container" class="doc-img-container">
+            <p>No document uploaded</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet JS for Map -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>
