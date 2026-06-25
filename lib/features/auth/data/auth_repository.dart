@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/constants/api_constants.dart';
-import '../../../../core/constants/demo_mode.dart';
 import '../../../../core/models/user_model.dart';
 import '../../../../core/network/api_client.dart';
 
@@ -16,9 +15,7 @@ class AuthRepository {
 
   // ── Login ──────────────────────────────────────────────────────────────────
   Future<UserModel> login(String identifier, String password, {bool isEmail = true}) async {
-    // ── DEMO MODE: skip network, return mock user ──────────────────────────
-    if (kDemoMode) return kDemoUser;
-    // ──────────────────────────────────────────────────────────────────────
+
     try {
       final payload = isEmail
           ? {'email': identifier, 'password': password}
@@ -62,9 +59,7 @@ class AuthRepository {
 
   // ── Token check (Live Verification) ────────────────────────────────────────
   Future<bool> isAuthenticated() async {
-    // ── DEMO MODE: always authenticated ───────────────────────────────────
-    if (kDemoMode) return true;
-    // ──────────────────────────────────────────────────────────────────────
+
     final prefs = await SharedPreferences.getInstance();
     if (!prefs.containsKey(_kAuthToken)) return false;
 

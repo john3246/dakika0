@@ -5,7 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/localization/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/custom_widgets.dart';
-import '../../../orders/providers/order_provider.dart';
+import '../../../../core/services/location_service.dart';
+import 'order_verification_screen.dart';
 
 class RequestDeliveryScreen extends ConsumerStatefulWidget {
   const RequestDeliveryScreen({super.key});
@@ -23,7 +24,9 @@ class _RequestDeliveryScreenState
   final _weightController       = TextEditingController();
   final _suggestedPriceController = TextEditingController();
 
-  bool _isSubmitting = false;
+  bool _isLoadingLocation = false;
+  double? _pickupLat;
+  double? _pickupLng;
 
   @override
   void dispose() {
@@ -35,7 +38,32 @@ class _RequestDeliveryScreenState
     super.dispose();
   }
 
-  Future<void> _submitOrder() async {
+  @override
+  void initState() {
+    super.initState();
+    _fetchLocation();
+  }
+
+  Future<void> _fetchLocation() async {
+    setState(() => _isLoadingLocation = true);
+    final locationService = LocationService();
+    final hasPermission = await locationService.requestPermission();
+    if (hasPermission) {
+      final position = await locationService.getCurrentLocation();
+      if (position != null) {
+        setState(() {
+          _pickupLat = position.latitude;
+          _pickupLng = position.longitude;
+          _pickupController.text = "Current GPS Location";
+        });
+      }
+    }
+    if (mounted) {
+      setState(() => _isLoadingLocation = false);
+    }
+  }
+
+  Future<void> _proceedToVerification() async {
     final pickup  = _pickupController.text.trim();
     final dropoff = _dropoffController.text.trim();
     final item    = _itemTypeController.text.trim();
@@ -47,43 +75,37 @@ class _RequestDeliveryScreenState
       return;
     }
 
-    setState(() => _isSubmitting = true);
-
-    try {
-      final repo   = ref.read(orderRepositoryProvider);
-      final weight = double.tryParse(_weightController.text.trim());
-      final suggestedPrice = double.tryParse(_suggestedPriceController.text.trim());
-
-      await repo.createOrder(
-        pickupAddress:  pickup,
-        dropoffAddress: dropoff,
-        itemType:       item,
-        packageWeightKg: weight,
-        suggestedPrice: suggestedPrice,
+    if (_pickupLat == null || _pickupLng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please wait for GPS location or ensure permissions are granted.')),
       );
-
-      // Refresh the active orders list and stats
-      ref.invalidate(myActiveOrdersProvider);
-      ref.invalidate(orderStatsProvider);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Order placed successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+      return;
     }
+
+    // Mock dropoff location based on pickup for demo purposes since we don't have Geocoding
+    // (adding ~5km offset)
+    final dropoffLat = _pickupLat! + 0.045;
+    final dropoffLng = _pickupLng! + 0.045;
+
+    final weight = double.tryParse(_weightController.text.trim());
+    final suggestedPrice = double.tryParse(_suggestedPriceController.text.trim());
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OrderVerificationScreen(
+          pickupAddress: pickup,
+          dropoffAddress: dropoff,
+          itemType: item,
+          packageWeightKg: weight,
+          suggestedPrice: suggestedPrice,
+          pickupLat: _pickupLat!,
+          pickupLng: _pickupLng!,
+          dropoffLat: dropoffLat,
+          dropoffLng: dropoffLng,
+        ),
+      ),
+    );
   }
 
   @override
@@ -101,15 +123,22 @@ class _RequestDeliveryScreenState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Pickup ─────────────────────────────────────────────────
-            const Text(
-              "Where is the pickup?",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                const Text(
+                  "Where is the pickup?",
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                if (_isLoadingLocation) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+              ],
             ),
             const SizedBox(height: 12),
             CustomTextField(
               hintText: context.tr('pickup_location'),
               prefixIcon: Icons.location_on_outlined,
               controller: _pickupController,
+              readOnly: true, // Auto-populated by GPS
             ),
 
             const SizedBox(height: 24),
@@ -216,11 +245,10 @@ class _RequestDeliveryScreenState
 
             const SizedBox(height: 40),
 
-            // ── Submit ─────────────────────────────────────────────────
+            // ── Proceed to Verification ──────────────────────────────
             CustomButton(
-              text: context.tr('confirm_order'),
-              isLoading: _isSubmitting,
-              onPressed: _submitOrder,
+              text: 'Verify & Confirm',
+              onPressed: _proceedToVerification,
             ),
           ],
         ),

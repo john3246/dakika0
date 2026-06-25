@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/api_constants.dart';
@@ -32,6 +33,20 @@ class ApiClient {
           await prefs.remove('auth_token');
           await prefs.remove('user_json');
         }
+
+        // Network Fail-safe
+        if (e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.sendTimeout ||
+            e.type == DioExceptionType.connectionError ||
+            e.error is SocketException) {
+          return handler.next(
+            e.copyWith(
+              message: 'No internet connection. Please check your network and try again.',
+            ),
+          );
+        }
+
         return handler.next(e);
       },
     ));

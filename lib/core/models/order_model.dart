@@ -1,7 +1,7 @@
 // ─── core/models/order_model.dart ────────────────────────────────────────────
 class OrderModel {
   final String id;
-  final String customerId;
+  final String creatorId; // Renamed from customerId
   final String? courierId;
   final String status;
 
@@ -20,9 +20,14 @@ class OrderModel {
   final String? itemDescription;
   final double? packageWeightKg;
 
-  // Pricing
-  final double estimatedPrice;
+  // Pricing and Distance
+  final double? distanceKm;
+  final double totalPrice;
   final double? suggestedPrice;
+
+  // QR and Handoff
+  final String? qrCodeSecureString;
+  final DateTime? handoffEstimatedTime;
 
   // Cancel
   final String? cancelReason;
@@ -34,9 +39,9 @@ class OrderModel {
   final DateTime? completedAt;
 
   // Joined fields
-  final String? customerName;
-  final String? customerPhone;
-  final double? customerRating;
+  final String? creatorName;
+  final String? creatorPhone;
+  final double? creatorRating;
   final String? courierName;
   final String? courierPhone;
   final double? courierRating;
@@ -46,7 +51,7 @@ class OrderModel {
 
   const OrderModel({
     required this.id,
-    required this.customerId,
+    required this.creatorId,
     this.courierId,
     required this.status,
     required this.pickupAddress,
@@ -58,16 +63,19 @@ class OrderModel {
     required this.itemType,
     this.itemDescription,
     this.packageWeightKg,
-    required this.estimatedPrice,
+    this.distanceKm,
+    required this.totalPrice,
     this.suggestedPrice,
+    this.qrCodeSecureString,
+    this.handoffEstimatedTime,
     this.cancelReason,
     required this.createdAt,
     this.acceptedAt,
     this.pickedUpAt,
     this.completedAt,
-    this.customerName,
-    this.customerPhone,
-    this.customerRating,
+    this.creatorName,
+    this.creatorPhone,
+    this.creatorRating,
     this.courierName,
     this.courierPhone,
     this.courierRating,
@@ -89,15 +97,15 @@ class OrderModel {
     }
   }
 
-  /// Display price: use suggestedPrice if the sender set one, otherwise estimatedPrice.
-  double get displayPrice => suggestedPrice ?? estimatedPrice;
+  /// Display price: use suggestedPrice if the sender set one, otherwise totalPrice.
+  double get displayPrice => suggestedPrice ?? totalPrice;
 
   factory OrderModel.fromJson(Map<String, dynamic> json) {
     return OrderModel(
       id:             json['id']         as String,
-      customerId:     json['customerId'] as String,
+      creatorId:      json['creatorId']  as String,
       courierId:      json['courierId']  as String?,
-      status:         json['status']     as String,
+      status:         (json['status']     as String).toUpperCase(),
 
       pickupAddress:   json['pickupAddress']   as String,
       pickupLatitude:  (json['pickupLatitude']  as num?)?.toDouble() ?? 0.0,
@@ -110,8 +118,11 @@ class OrderModel {
       itemType:         json['itemType']         as String,
       itemDescription:  json['itemDescription']  as String?,
       packageWeightKg:  json['packageWeightKg'] != null ? double.tryParse(json['packageWeightKg'].toString()) : null,
-      estimatedPrice:   double.tryParse(json['estimatedPrice'].toString()) ?? 0.0,
+      distanceKm:       json['distanceKm'] != null ? double.tryParse(json['distanceKm'].toString()) : null,
+      totalPrice:       double.tryParse(json['totalPrice'].toString()) ?? 0.0,
       suggestedPrice:   json['suggestedPrice'] != null ? double.tryParse(json['suggestedPrice'].toString()) : null,
+      qrCodeSecureString: json['qrCodeSecureString'] as String?,
+      handoffEstimatedTime: json['handoffEstimatedTime'] != null ? DateTime.parse(json['handoffEstimatedTime'] as String) : null,
       cancelReason:     json['cancelReason']     as String?,
 
       createdAt:   DateTime.parse(json['createdAt']  as String),
@@ -119,9 +130,9 @@ class OrderModel {
       pickedUpAt:  json['pickedUpAt']  != null ? DateTime.parse(json['pickedUpAt']  as String) : null,
       completedAt: json['completedAt'] != null ? DateTime.parse(json['completedAt'] as String) : null,
 
-      customerName:      json['customerName']      as String?,
-      customerPhone:     json['customerPhone']     as String?,
-      customerRating:    json['customerRating'] != null ? double.tryParse(json['customerRating'].toString()) : null,
+      creatorName:       json['creatorName']       as String?,
+      creatorPhone:      json['creatorPhone']      as String?,
+      creatorRating:     json['creatorRating'] != null ? double.tryParse(json['creatorRating'].toString()) : null,
       courierName:       json['courierName']       as String?,
       courierPhone:      json['courierPhone']      as String?,
       courierRating:     json['courierRating'] != null ? double.tryParse(json['courierRating'].toString()) : null,

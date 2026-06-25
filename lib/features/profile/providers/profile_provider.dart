@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../../core/constants/demo_mode.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../data/profile_repository.dart';
 
@@ -15,9 +14,7 @@ class ProfileNotifier extends AutoDisposeAsyncNotifier<Map<String, dynamic>> {
   Future<Map<String, dynamic>> build() => _fetchProfile();
 
   Future<Map<String, dynamic>> _fetchProfile() async {
-    // ── DEMO MODE: return mock profile data ──────────────────────────────
-    if (kDemoMode) return kDemoUser.toJson();
-    // ──────────────────────────────────────────────────────────────────────
+
     final repo = ref.read(profileRepositoryProvider);
     return repo.getProfile();
   }

@@ -4,7 +4,6 @@
 
 import 'package:dio/dio.dart';
 import '../../../../core/constants/api_constants.dart';
-import '../../../../core/constants/demo_mode.dart';
 import '../../../../core/models/order_model.dart';
 import '../../../../core/network/api_client.dart';
 
@@ -51,9 +50,7 @@ class OrderRepository {
   // ── Get current user's orders, optionally filtered by status ───────────────
   // statusFilter example: 'ACCEPTED,PICKED_UP'  or  null for all
   Future<List<OrderModel>> getMyOrders({String? statusFilter}) async {
-    // ── DEMO MODE ───────────────────────────────────────────────────────────────
-    if (kDemoMode) return kDemoActiveOrders;
-    // ───────────────────────────────────────────────────────────────────────
+
     try {
       final response = await _apiClient.dio.get(
         ApiConstants.myOrdersEndpoint,
@@ -68,9 +65,7 @@ class OrderRepository {
 
   // ── Get PENDING orders available for couriers to accept ──────────────────
   Future<List<OrderModel>> getAvailableOrders() async {
-    // ── DEMO MODE ───────────────────────────────────────────────────────────────
-    if (kDemoMode) return kDemoAvailableOrders;
-    // ───────────────────────────────────────────────────────────────────────
+
     try {
       final response = await _apiClient.dio.get(ApiConstants.availableOrdersEndpoint);
       final list = response.data['orders'] as List<dynamic>;
@@ -82,9 +77,7 @@ class OrderRepository {
 
   // ── Get nearby PENDING/ACCEPTED orders using Geospatial Radius ──────────
   Future<List<OrderModel>> getNearbyOrders(double lat, double lng, {double radiusKm = 10.0}) async {
-    // ── DEMO MODE ───────────────────────────────────────────────────────────────
-    if (kDemoMode) return kDemoAvailableOrders;
-    // ───────────────────────────────────────────────────────────────────────
+
     try {
       final response = await _apiClient.dio.get(
         '${ApiConstants.ordersEndpoint}/nearby',
@@ -123,11 +116,35 @@ class OrderRepository {
     }
   }
 
+  // ── Pickup Order (QR Validation) ──────────────────────────────────────────
+  Future<OrderModel> pickupOrder(String orderId, String qrCode) async {
+    try {
+      final response = await _apiClient.dio.post(
+        '${ApiConstants.ordersEndpoint}/$orderId/pickup',
+        data: {'qrCodeSecureString': qrCode},
+      );
+      return OrderModel.fromJson(response.data['order'] as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw Exception(e.response?.data['message'] ?? e.message);
+    }
+  }
+
+  // ── Complete Order (QR Validation) ────────────────────────────────────────
+  Future<OrderModel> completeOrder(String orderId, String qrCode) async {
+    try {
+      final response = await _apiClient.dio.post(
+        '${ApiConstants.ordersEndpoint}/$orderId/complete',
+        data: {'qrCodeSecureString': qrCode},
+      );
+      return OrderModel.fromJson(response.data['order'] as Map<String, dynamic>);
+    } on DioException catch (e) {
+      throw Exception(e.response?.data['message'] ?? e.message);
+    }
+  }
+
   // ── Get order count stats for the dashboard ──────────────────────────────
   Future<Map<String, int>> getMyStats() async {
-    // ── DEMO MODE ───────────────────────────────────────────────────────────────
-    if (kDemoMode) return kDemoStats;
-    // ───────────────────────────────────────────────────────────────────────
+
     try {
       final response = await _apiClient.dio.get(ApiConstants.orderStatsEndpoint);
       final raw = response.data['stats'] as Map<String, dynamic>;

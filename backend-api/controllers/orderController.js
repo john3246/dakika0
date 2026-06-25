@@ -26,60 +26,38 @@ const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-const BASE_FEE = 2.00;
-const PER_KM_RATE = 0.50;
-
 exports.createOrder = async (req, res) => {
-  const customerId = req.user.id;
+  const creatorId = req.user.id;
   const {
     pickupAddress, pickupLat, pickupLng,
-    dropoffAddress, dropoffLat, dropoffLng,
-    itemDescription, estimatedPrice,
-    receiverName, receiverPhone, receiverNationalId
+    dropoffAddress, dropoffLat, dropoffLng
   } = req.body;
 
-  if (!pickupAddress || !dropoffAddress || !receiverName || !receiverPhone) {
-    return res.status(400).json({ error: 'Bad Request', message: 'Missing required fields' });
+  if (!pickupAddress || !dropoffAddress || pickupLat == null || pickupLng == null || dropoffLat == null || dropoffLng == null) {
+    return res.status(400).json({ error: 'Bad Request', message: 'Missing required location fields' });
   }
 
-  // Pricing Engine (Fallback Calculation if not passed)
-  let finalEstimatedPrice = parseFloat(estimatedPrice);
-  if (!finalEstimatedPrice && pickupLat && pickupLng && dropoffLat && dropoffLng) {
-    const distance = calculateDistanceKm(pickupLat, pickupLng, dropoffLat, dropoffLng);
-    finalEstimatedPrice = BASE_FEE + (distance * PER_KM_RATE);
-    finalEstimatedPrice = Math.round(finalEstimatedPrice * 100) / 100;
-  }
-  if (!finalEstimatedPrice) {
-    finalEstimatedPrice = BASE_FEE;
-  }
+  const distanceKm = calculateDistanceKm(pickupLat, pickupLng, dropoffLat, dropoffLng);
+  const totalPrice = Math.round(distanceKm * 500 * 100) / 100;
 
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
 
-    // Generate secure random UUID
     const orderId = crypto.randomUUID();
-    // Generate secure random 6-digit OTP
-    const verificationOtp = crypto.randomInt(100000, 999999).toString();
-    // Build QR code payload: Order UUID, Sender ID, Receiver Phone
-    const qrCodePayload = `orderId:${orderId}|senderId:${customerId}|receiverPhone:${receiverPhone}`;
-    // Expiration set exactly 2 minutes into the future
-    const broadcastExpiresAt = new Date(Date.now() + 2 * 60 * 1000);
+    const qrCodeSecureString = crypto.randomBytes(32).toString('hex');
 
     const result = await client.query(
       `INSERT INTO orders
-         (id, customer_id, pickup_address, pickup_latitude, pickup_longitude,
+         (id, creator_id, pickup_address, pickup_latitude, pickup_longitude,
           dropoff_address, dropoff_latitude, dropoff_longitude,
-          item_type, item_description, estimated_price,
-          receiver_name, receiver_phone, receiver_national_id, qr_code_payload, verification_otp, broadcast_expires_at, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'PENDING')
+          distance_km, total_price, qr_code_secure_string, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
        RETURNING *`,
       [
-        orderId, customerId, pickupAddress, pickupLat || 0, pickupLng || 0,
-        dropoffAddress, dropoffLat || 0, dropoffLng || 0,
-        'Package', itemDescription || null, finalEstimatedPrice,
-        receiverName, receiverPhone, receiverNationalId || null,
-        qrCodePayload, verificationOtp, broadcastExpiresAt
+        orderId, creatorId, pickupAddress, pickupLat, pickupLng,
+        dropoffAddress, dropoffLat, dropoffLng,
+        distanceKm, totalPrice, qrCodeSecureString
       ]
     );
 
@@ -88,10 +66,6 @@ exports.createOrder = async (req, res) => {
     const order = result.rows[0];
     const camelOrder = toCamel(order);
 
-    // Print generated OTP simulating SMS delivery
-    console.log(`[SMS Simulation] To ${receiverPhone} - Verification OTP for Order ${orderId}: ${verificationOtp}`);
-
-    // Broadcast creation
     wsManager.broadcastOrderEvent(camelOrder, 'order_created');
 
     res.status(201).json({ message: 'Order created', order: camelOrder });
@@ -107,7 +81,6 @@ exports.createOrder = async (req, res) => {
 exports.getBroadcasts = async (req, res) => {
   const courierId = req.user.id;
   try {
-    // Check if courier is fully verified in courier_profiles
     const userRes = await db.query(
       'SELECT is_verified FROM courier_profiles WHERE user_id = $1',
       [courierId]
@@ -118,10 +91,10 @@ exports.getBroadcasts = async (req, res) => {
     }
 
     const result = await db.query(
-      `SELECT o.*, u.name AS customer_name, u.sender_rating
+      `SELECT o.*, u.name AS creator_name, u.sender_rating
        FROM orders o
-       JOIN users u ON u.id = o.customer_id
-       WHERE o.status = 'PENDING' AND o.broadcast_expires_at > NOW()
+       JOIN users u ON u.id = o.creator_id
+       WHERE o.status = 'pending'
        ORDER BY o.created_at DESC`
     );
     res.json({ orders: result.rows.map(toCamel) });
@@ -143,7 +116,6 @@ exports.acceptOrder = async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Check if courier is fully verified
     const profileRes = await client.query(
       'SELECT is_verified FROM courier_profiles WHERE user_id = $1',
       [courierId]
@@ -154,7 +126,6 @@ exports.acceptOrder = async (req, res) => {
       return res.status(403).json({ error: 'Forbidden', message: 'Only verified couriers can accept orders' });
     }
 
-    // Fetch order with row-level lock
     const orderRes = await client.query(
       'SELECT * FROM orders WHERE id = $1 FOR UPDATE',
       [orderId]
@@ -166,22 +137,19 @@ exports.acceptOrder = async (req, res) => {
 
     const order = orderRes.rows[0];
 
-    // Expiry check
-    if (new Date() > new Date(order.broadcast_expires_at)) {
+    if (order.creator_id === courierId) {
       await client.query('ROLLBACK');
-      return res.status(410).json({ error: 'Gone', message: 'Order broadcast has expired. Cannot accept.' });
+      return res.status(400).json({ error: 'Bad Request', message: 'You cannot accept your own order' });
     }
 
-    // Availability check
-    if (order.courier_id !== null || order.status !== 'PENDING') {
+    if (order.courier_id !== null || order.status !== 'pending') {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Conflict', message: 'Order has already been accepted' });
     }
 
-    // Update order
     const updateRes = await client.query(
       `UPDATE orders 
-       SET status = 'ACCEPTED', courier_id = $1, accepted_at = NOW() 
+       SET status = 'accepted', courier_id = $1, updated_at = NOW() 
        WHERE id = $2 
        RETURNING *`,
       [courierId, orderId]
@@ -203,11 +171,11 @@ exports.acceptOrder = async (req, res) => {
 };
 
 exports.pickupOrder = async (req, res) => {
-  const { orderId, scannedQrPayload } = req.body;
+  const { orderId, qrCodeSecureString } = req.body;
   const courierId = req.user.id;
 
-  if (!orderId || !scannedQrPayload) {
-    return res.status(400).json({ error: 'Bad Request', message: 'Order ID and scanned QR payload are required' });
+  if (!orderId || !qrCodeSecureString) {
+    return res.status(400).json({ error: 'Bad Request', message: 'Order ID and QR code string are required' });
   }
 
   const client = await db.getClient();
@@ -230,23 +198,28 @@ exports.pickupOrder = async (req, res) => {
       return res.status(403).json({ error: 'Forbidden', message: 'Access denied: You are not the assigned courier for this order' });
     }
 
-    if (order.status !== 'ACCEPTED') {
+    if (order.status !== 'accepted') {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Conflict', message: 'Order must be in ACCEPTED status' });
+      return res.status(409).json({ error: 'Conflict', message: 'Order must be in accepted status' });
     }
 
-    // Compare scannedQrPayload
-    if (scannedQrPayload !== order.qr_code_payload) {
+    if (qrCodeSecureString !== order.qr_code_secure_string) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Bad Request', message: 'Invalid QR code payload: Proof of Pickup failed' });
+      return res.status(400).json({ error: 'Bad Request', message: 'Invalid QR code: Proof of Pickup failed' });
     }
+
+    // Calculate handoff_estimated_time assuming 30 km/h speed
+    const distanceKm = parseFloat(order.distance_km);
+    const hoursToDeliver = distanceKm / 30;
+    const msToDeliver = hoursToDeliver * 60 * 60 * 1000;
+    const estimatedTime = new Date(Date.now() + msToDeliver);
 
     const updateRes = await client.query(
       `UPDATE orders 
-       SET status = 'PICKED_UP', picked_up_at = NOW() 
-       WHERE id = $1 
+       SET status = 'picked_up', handoff_estimated_time = $1, updated_at = NOW() 
+       WHERE id = $2 
        RETURNING *`,
-      [orderId]
+      [estimatedTime, orderId]
     );
 
     await client.query('COMMIT');
@@ -265,11 +238,11 @@ exports.pickupOrder = async (req, res) => {
 };
 
 exports.completeOrder = async (req, res) => {
-  const { orderId, inputtedOtp } = req.body;
+  const { orderId, qrCodeSecureString } = req.body;
   const courierId = req.user.id;
 
-  if (!orderId || !inputtedOtp) {
-    return res.status(400).json({ error: 'Bad Request', message: 'Order ID and inputted OTP are required' });
+  if (!orderId || !qrCodeSecureString) {
+    return res.status(400).json({ error: 'Bad Request', message: 'Order ID and QR code string are required' });
   }
 
   const client = await db.getClient();
@@ -292,20 +265,19 @@ exports.completeOrder = async (req, res) => {
       return res.status(403).json({ error: 'Forbidden', message: 'Access denied: You are not the assigned courier for this order' });
     }
 
-    if (order.status !== 'PICKED_UP') {
+    if (order.status !== 'picked_up') {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Conflict', message: 'Order must be in PICKED_UP status' });
+      return res.status(409).json({ error: 'Conflict', message: 'Order must be in picked_up status' });
     }
 
-    // Compare OTP
-    if (inputtedOtp !== order.verification_otp) {
+    if (qrCodeSecureString !== order.qr_code_secure_string) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Bad Request', message: 'Invalid OTP code: Proof of Delivery failed' });
+      return res.status(400).json({ error: 'Bad Request', message: 'Invalid QR Code: Proof of Delivery failed' });
     }
 
     const updateRes = await client.query(
       `UPDATE orders 
-       SET status = 'DELIVERED', completed_at = NOW() 
+       SET status = 'delivered', updated_at = NOW() 
        WHERE id = $1 
        RETURNING *`,
       [orderId]
@@ -329,22 +301,22 @@ exports.completeOrder = async (req, res) => {
 exports.getMyOrders = async (req, res) => {
   const userId = req.user.id;
   const rawStatus = req.query.status;
-  const statusList = rawStatus ? rawStatus.split(',').map((s) => s.trim().toUpperCase()) : null;
+  const statusList = rawStatus ? rawStatus.split(',').map((s) => s.trim().toLowerCase()) : null;
 
   try {
     let query = `
       SELECT o.*, 
-             cu.name AS customer_name,
+             cu.name AS creator_name,
              co.name AS courier_name
       FROM orders o
-      JOIN users cu ON cu.id = o.customer_id
+      JOIN users cu ON cu.id = o.creator_id
       LEFT JOIN users co ON co.id = o.courier_id
-      WHERE (o.customer_id = $1 OR o.courier_id = $1)
+      WHERE (o.creator_id = $1 OR o.courier_id = $1)
     `;
     const params = [userId];
 
     if (statusList) {
-      query += ` AND o.status = ANY($2::order_status[])`;
+      query += ` AND o.status = ANY($2::text[])`;
       params.push(statusList);
     }
     
@@ -366,10 +338,10 @@ exports.getAvailableOrders = async (req, res) => {
     }
 
     const result = await db.query(
-      `SELECT o.*, u.name AS customer_name, u.sender_rating
+      `SELECT o.*, u.name AS creator_name, u.sender_rating
        FROM orders o
-       JOIN users u ON u.id = o.customer_id
-       WHERE o.status = 'PENDING'
+       JOIN users u ON u.id = o.creator_id
+       WHERE o.status = 'pending'
        ORDER BY o.created_at DESC`
     );
     res.json({ orders: result.rows.map(toCamel) });
@@ -393,10 +365,10 @@ exports.getNearbyOrders = async (req, res) => {
     }
 
     const result = await db.query(
-      `SELECT o.*, u.name AS customer_name, u.sender_rating
+      `SELECT o.*, u.name AS creator_name, u.sender_rating
        FROM orders o
-       JOIN users u ON u.id = o.customer_id
-       WHERE o.status IN ('PENDING', 'ACCEPTED')
+       JOIN users u ON u.id = o.creator_id
+       WHERE o.status IN ('pending', 'accepted')
        ORDER BY o.created_at DESC`
     );
 
@@ -424,11 +396,11 @@ exports.getOrderById = async (req, res) => {
   try {
     const result = await db.query(
       `SELECT o.*,
-         cust.name AS customer_name, cust.phone AS customer_phone, cust.sender_rating AS customer_rating,
+         cust.name AS creator_name, cust.phone AS creator_phone, cust.sender_rating AS creator_rating,
          cour.name AS courier_name, cour.phone AS courier_phone, cour.courier_rating, cour.is_fully_verified AS courier_is_verified,
          cour.current_latitude AS courier_latitude, cour.current_longitude AS courier_longitude
        FROM orders o
-       JOIN users cust ON cust.id = o.customer_id
+       JOIN users cust ON cust.id = o.creator_id
        LEFT JOIN users cour ON cour.id = o.courier_id
        WHERE o.id = $1`,
       [id]
@@ -437,7 +409,7 @@ exports.getOrderById = async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
     const order = result.rows[0];
 
-    if (order.customer_id !== userId && order.courier_id !== userId && order.status !== 'PENDING') {
+    if (order.creator_id !== userId && order.courier_id !== userId && order.status !== 'pending') {
       return res.status(403).json({ error: 'Forbidden', message: 'Access denied' });
     }
 
@@ -450,79 +422,30 @@ exports.getOrderById = async (req, res) => {
 
 exports.updateOrderStatus = async (req, res) => {
   const { id } = req.params;
-  const { status, cancelReason, qrPayload, otp } = req.body;
+  let { status } = req.body;
+  status = status ? status.toLowerCase() : null;
   const userId = req.user.id;
 
-  const VALID_STATUSES = ['ACCEPTED', 'PICKED_UP', 'DELIVERED', 'CANCELLED'];
+  const VALID_STATUSES = ['accepted', 'picked_up', 'delivered', 'cancelled'];
   if (!VALID_STATUSES.includes(status)) {
-    return res.status(400).json({ error: 'Bad Request', message: `Invalid status.` });
+    return res.status(400).json({ error: 'Bad Request', message: \`Invalid status.\` });
   }
 
   try {
-    const userRes = await db.query('SELECT is_fully_verified FROM users WHERE id = $1', [userId]);
-    const isVerified = userRes.rows[0]?.is_fully_verified;
+    const userRes = await db.query('SELECT is_fully_verified, role FROM users WHERE id = $1', [userId]);
+    const user = userRes.rows[0];
+    if (!user) return res.status(404).json({ error: 'Not Found', message: 'User not found' });
 
-    const { rows } = await db.query('SELECT * FROM orders WHERE id = $1', [id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
-    const order = rows[0];
-
-    if (status === 'ACCEPTED') {
-      if (order.status !== 'PENDING') return res.status(409).json({ error: 'Conflict', message: 'Order is no longer available' });
-      if (!isVerified) return res.status(403).json({ error: 'Forbidden', message: 'Only verified users can accept orders' });
-      if (order.customer_id === userId) {
-        return res.status(400).json({ error: 'Bad Request', message: 'You cannot accept your own order' });
-      }
-      if (new Date() > new Date(order.broadcast_expires_at)) {
-        return res.status(403).json({ error: 'Forbidden', message: 'Order broadcast has expired. Cannot accept anymore.' });
-      }
-    }
-    if (status === 'PICKED_UP' || status === 'DELIVERED') {
-      if (order.courier_id !== userId) return res.status(403).json({ error: 'Forbidden', message: 'Not your assigned order' });
-      if (status === 'PICKED_UP' && order.status !== 'ACCEPTED') return res.status(409).json({ error: 'Conflict', message: 'Must be ACCEPTED first' });
-      if (status === 'DELIVERED' && order.status !== 'PICKED_UP') return res.status(409).json({ error: 'Conflict', message: 'Must be PICKED_UP first' });
-      
-      if (status === 'PICKED_UP') {
-        if (!qrPayload || qrPayload !== order.qr_code_payload) {
-          return res.status(400).json({ error: 'Bad Request', message: 'Invalid Sender QR Code. Proof of Pickup failed.' });
-        }
-      }
-      
-      if (status === 'DELIVERED') {
-        if (!otp && !qrPayload) {
-          return res.status(400).json({ error: 'Bad Request', message: 'Must provide either OTP or Receiver QR Code for Proof of Delivery.' });
-        }
-        if (otp && otp !== order.verification_otp) {
-          return res.status(400).json({ error: 'Bad Request', message: 'Invalid Receiver OTP. Proof of Delivery failed.' });
-        }
-        if (qrPayload && qrPayload !== order.qr_code_payload + '-receiver') {
-           return res.status(400).json({ error: 'Bad Request', message: 'Invalid Receiver QR Code. Proof of Delivery failed.' });
-        }
-      }
+    // Allow Admins to arbitrarily update statuses for support purposes
+    if (user.role.toUpperCase() === 'ADMIN') {
+      const updated = await db.query(\`UPDATE orders SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *\`, [status, id]);
+      if (updated.rows.length === 0) return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
+      const camelOrder = toCamel(updated.rows[0]);
+      wsManager.broadcastOrderEvent(camelOrder, 'order_' + status);
+      return res.json({ message: \`Order forced to \${status} by admin\`, order: camelOrder });
     }
 
-    let updateQuery, updateParams;
-    const now = new Date();
-
-    if (status === 'ACCEPTED') {
-      updateQuery = `UPDATE orders SET status='ACCEPTED', courier_id=$1, accepted_at=$2 WHERE id=$3 RETURNING *`;
-      updateParams = [userId, now, id];
-    } else if (status === 'PICKED_UP') {
-      updateQuery = `UPDATE orders SET status='PICKED_UP', picked_up_at=$1 WHERE id=$2 RETURNING *`;
-      updateParams = [now, id];
-    } else if (status === 'DELIVERED') {
-      updateQuery = `UPDATE orders SET status='DELIVERED', completed_at=$1 WHERE id=$2 RETURNING *`;
-      updateParams = [now, id];
-    } else {
-      updateQuery = `UPDATE orders SET status='CANCELLED', cancel_reason=$1 WHERE id=$2 RETURNING *`;
-      updateParams = [cancelReason ?? null, id];
-    }
-
-    const updated = await db.query(updateQuery, updateParams);
-    const camelOrder = toCamel(updated.rows[0]);
-
-    wsManager.broadcastOrderEvent(camelOrder, 'order_' + status.toLowerCase());
-
-    res.json({ message: `Order ${status.toLowerCase()}`, order: camelOrder });
+    return res.status(403).json({ error: 'Forbidden', message: 'Please use the specific endpoints (accept, pickup, complete) instead' });
   } catch (err) {
     console.error('updateOrderStatus error:', err);
     res.status(500).json({ error: 'Internal Server Error', message: 'Internal server error' });
@@ -535,12 +458,12 @@ exports.getMyStats = async (req, res) => {
     const result = await db.query(
       `SELECT status, COUNT(*)::int AS count
        FROM orders
-       WHERE customer_id = $1 OR courier_id = $1
+       WHERE creator_id = $1 OR courier_id = $1
        GROUP BY status`,
       [userId]
     );
 
-    const stats = { PENDING: 0, ACCEPTED: 0, PICKED_UP: 0, DELIVERED: 0, CANCELLED: 0 };
+    const stats = { pending: 0, accepted: 0, picked_up: 0, delivered: 0, cancelled: 0 };
     result.rows.forEach((r) => { stats[r.status] = r.count; });
     res.json({ stats });
   } catch (err) {
@@ -563,16 +486,16 @@ exports.rateOrder = async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
     const order = rows[0];
 
-    if (order.status !== 'DELIVERED') {
+    if (order.status !== 'delivered') {
       return res.status(400).json({ error: 'Bad Request', message: 'Can only rate delivered orders' });
     }
 
     let targetUserId, ratingColumn;
-    if (order.customer_id === userId) {
+    if (order.creator_id === userId) {
       targetUserId = order.courier_id;
       ratingColumn = 'courier_rating';
     } else if (order.courier_id === userId) {
-      targetUserId = order.customer_id;
+      targetUserId = order.creator_id;
       ratingColumn = 'sender_rating';
     } else {
       return res.status(403).json({ error: 'Forbidden', message: 'Not involved in this order' });
@@ -581,7 +504,7 @@ exports.rateOrder = async (req, res) => {
     if (!targetUserId) return res.status(400).json({ error: 'Bad Request', message: 'Target user not found' });
 
     await db.query(
-      `UPDATE users SET ${ratingColumn} = LEAST(5.00, GREATEST(1.00, ((${ratingColumn} * 4) + $1) / 5.0)) WHERE id = $2`,
+      `UPDATE users SET \${ratingColumn} = LEAST(5.00, GREATEST(1.00, ((\${ratingColumn} * 4) + $1) / 5.0)) WHERE id = $2`,
       [rating, targetUserId]
     );
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/order_model.dart';
+import '../../../../core/services/websocket_service.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../data/order_repository.dart';
 
@@ -17,8 +18,15 @@ final myActiveOrdersProvider =
 class MyActiveOrdersNotifier extends AutoDisposeAsyncNotifier<List<OrderModel>> {
   @override
   Future<List<OrderModel>> build() {
-    final timer = Timer.periodic(const Duration(seconds: 10), (_) => ref.invalidateSelf());
-    ref.onDispose(() => timer.cancel());
+    final ws = ref.watch(webSocketServiceProvider);
+    final sub = ws.eventStream.listen((event) {
+      if (['order_created', 'order_accepted', 'order_picked_up', 'order_delivered', 'order_cancelled', 'delivery_location_update']
+          .contains(event['eventType'] ?? event['type'])) {
+        ref.invalidateSelf();
+      }
+    });
+    ref.onDispose(() => sub.cancel());
+    
     return _fetch();
   }
 
@@ -45,8 +53,15 @@ final availableOrdersProvider =
 class AvailableOrdersNotifier extends AutoDisposeAsyncNotifier<List<OrderModel>> {
   @override
   Future<List<OrderModel>> build() {
-    final timer = Timer.periodic(const Duration(seconds: 10), (_) => ref.invalidateSelf());
-    ref.onDispose(() => timer.cancel());
+    final ws = ref.watch(webSocketServiceProvider);
+    final sub = ws.eventStream.listen((event) {
+      if (['order_created', 'order_accepted', 'order_broadcast']
+          .contains(event['eventType'] ?? event['type'])) {
+        ref.invalidateSelf();
+      }
+    });
+    ref.onDispose(() => sub.cancel());
+    
     return _fetch();
   }
 
@@ -75,8 +90,14 @@ final orderStatsProvider =
 class OrderStatsNotifier extends AutoDisposeAsyncNotifier<Map<String, int>> {
   @override
   Future<Map<String, int>> build() {
-    final timer = Timer.periodic(const Duration(seconds: 10), (_) => ref.invalidateSelf());
-    ref.onDispose(() => timer.cancel());
+    final ws = ref.watch(webSocketServiceProvider);
+    final sub = ws.eventStream.listen((event) {
+      if (['order_created', 'order_delivered', 'order_cancelled']
+          .contains(event['eventType'] ?? event['type'])) {
+        ref.invalidateSelf();
+      }
+    });
+    ref.onDispose(() => sub.cancel());
     return _fetch();
   }
 

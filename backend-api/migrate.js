@@ -22,15 +22,25 @@ async function migrate() {
     `);
 
     await db.query(`
-      ALTER TABLE orders 
-      ADD COLUMN IF NOT EXISTS receiver_name VARCHAR(255),
-      ADD COLUMN IF NOT EXISTS receiver_phone VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS receiver_national_id VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS qr_code_payload TEXT,
-      ADD COLUMN IF NOT EXISTS verification_otp VARCHAR(6),
-      ADD COLUMN IF NOT EXISTS broadcast_expires_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS proof_of_pickup_url VARCHAR(255),
-      ADD COLUMN IF NOT EXISTS proof_of_delivery_url VARCHAR(255);
+      DROP TABLE IF EXISTS orders CASCADE;
+      CREATE TABLE orders (
+        id UUID PRIMARY KEY,
+        creator_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        courier_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        status VARCHAR(20) DEFAULT 'pending',
+        pickup_latitude NUMERIC,
+        pickup_longitude NUMERIC,
+        dropoff_latitude NUMERIC,
+        dropoff_longitude NUMERIC,
+        pickup_address TEXT,
+        dropoff_address TEXT,
+        distance_km NUMERIC,
+        total_price NUMERIC,
+        qr_code_secure_string TEXT UNIQUE,
+        handoff_estimated_time TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
     `);
 
     await db.query(`

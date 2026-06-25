@@ -10,6 +10,8 @@ import '../../../../core/services/websocket_service.dart';
 import '../../../orders/providers/order_provider.dart';
 import '../../../auth/providers/auth_provider.dart';
 import '../../../orders/presentation/widgets/review_dialog.dart';
+import 'sender_qr_screen.dart';
+import 'courier_scanner_screen.dart';
 
 class DeliveryDetailScreen extends ConsumerStatefulWidget {
   final String orderId;
@@ -258,14 +260,23 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
           if (order.status != 'DELIVERED' && order.status != 'CANCELLED') ...[
             const SizedBox(height: 24),
             // Hide the "Accept Order" action silently if the user is the owner of the order
-            if (order.status == 'PENDING' && order.customerId != currentUserId)
+            // Action for Courier to Accept Order (No QR needed here)
+            if (order.status == 'PENDING' && order.creatorId != currentUserId)
               _buildActionButton(context, order, 'ACCEPTED', 'Accept Order', Colors.blue),
+
+            // Action for Courier to Scan QR at Pickup
             if (order.status == 'ACCEPTED' && order.courierId == currentUserId)
-              _buildActionButton(context, order, 'PICKED_UP', 'Mark as Picked Up', Colors.deepOrange),
+              _buildScanButton(context, order, true, 'Scan QR to Pickup', Colors.deepOrange),
+              
+            // Action for Courier to Scan QR at Dropoff
             if (order.status == 'PICKED_UP' && order.courierId == currentUserId)
-              _buildActionButton(context, order, 'DELIVERED', 'Mark as Delivered', Colors.green),
+              _buildScanButton(context, order, false, 'Scan QR to Complete', Colors.green),
+
+            // Action for Creator to show QR Code to Courier
+            if ((order.status == 'ACCEPTED' || order.status == 'PICKED_UP') && order.creatorId == currentUserId)
+              _buildShowQrButton(context, order),
           ],
-          if (order.status == 'PENDING' || (order.status == 'ACCEPTED' && order.customerId == currentUserId)) ...[
+          if (order.status == 'PENDING' || (order.status == 'ACCEPTED' && order.creatorId == currentUserId)) ...[
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -439,9 +450,9 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
             
             if (context.mounted) {
               if (newStatus == 'DELIVERED') {
-                final targetName = order.customerId == ref.read(currentUserProvider).valueOrNull?.id 
+                final targetName = order.creatorId == ref.read(currentUserProvider).valueOrNull?.id 
                     ? order.courierName ?? 'Courier' 
-                    : order.customerName ?? 'Sender';
+                    : order.creatorName ?? 'Sender';
                 
                 showDialog(
                   context: context,
@@ -534,6 +545,89 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildShowQrButton(BuildContext context, OrderModel order) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.navy,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        onPressed: () {
+          if (order.qrCodeSecureString == null) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SenderQrScreen(trackingToken: order.qrCodeSecureString!),
+            ),
+          );
+        },
+        icon: const Icon(Icons.qr_code_2),
+        label: const Text('Show QR to Courier', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+      ),
+    );
+  }
+
+  Widget _buildScanButton(BuildContext context, OrderModel order, bool isPickup, String label, Color color) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CourierScannerScreen(
+                title: label,
+                onScan: (qrCode) async {
+                  Navigator.pop(context); // Close scanner
+                  try {
+                    final repo = ref.read(orderRepositoryProvider);
+                    if (isPickup) {
+                      await repo.pickupOrder(order.id, qrCode);
+                    } else {
+                      await repo.completeOrder(order.id, qrCode);
+                    }
+                    _invalidateAll(order.id);
+                    
+                    if (mounted) {
+                      if (!isPickup) {
+                        // Complete order logic (show review)
+                        final targetName = order.creatorId == ref.read(currentUserProvider).valueOrNull?.id 
+                            ? order.courierName ?? 'Courier' 
+                            : order.creatorName ?? 'Sender';
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (_) => ReviewDialog(orderId: order.id, targetName: targetName),
+                        ).then((_) => _invalidateAll(order.id));
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Order picked up successfully!')));
+                      }
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Verification Failed: $e', style: const TextStyle(color: Colors.white)), backgroundColor: Colors.red));
+                    }
+                  }
+                },
+              ),
+            ),
+          );
+        },
+        icon: const Icon(Icons.qr_code_scanner),
+        label: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
       ),
     );
   }

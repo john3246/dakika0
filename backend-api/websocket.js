@@ -145,14 +145,13 @@ async function handleLocationUpdate(userId, lat, lng) {
     });
 
     // 3. Broadcast to order senders if courier is tracking/active on their order
-    // Find active orders where this user is the courier
     const activeOrders = await db.query(
-      `SELECT id, customer_id FROM orders WHERE courier_id = $1 AND status IN ('ACCEPTED', 'PICKED_UP')`,
+      `SELECT id, creator_id FROM orders WHERE courier_id = $1 AND status IN ('accepted', 'picked_up')`,
       [userId]
     );
 
     for (const order of activeOrders.rows) {
-      sendToUser(order.customer_id, {
+      sendToUser(order.creator_id, {
         type: 'delivery_location_update',
         orderId: order.id,
         latitude: lat,
@@ -204,8 +203,8 @@ function broadcastOrderEvent(order, eventType) {
   broadcastToAdmins(payload);
 
   // 2. Send to specific customer and courier if assigned
-  if (order.customerId) {
-    sendToUser(order.customerId, payload);
+  if (order.creatorId) {
+    sendToUser(order.creatorId, payload);
   }
   if (order.courierId) {
     sendToUser(order.courierId, payload);
@@ -220,7 +219,7 @@ function broadcastOrderEvent(order, eventType) {
     ).then(res => {
       res.rows.forEach(courier => {
         // Exclude the customer who created the order from receiving notifications/accepting
-        if (courier.id === order.customerId) return;
+        if (courier.id === order.creatorId) return;
 
         const distance = calculateDistanceKm(
           order.pickupLatitude,

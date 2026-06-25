@@ -5,6 +5,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../../core/models/order_model.dart';
 import '../../../../core/services/location_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../auth/providers/auth_provider.dart';
 import '../../../delivery/presentation/screens/delivery_detail_screen.dart';
 import '../../../orders/providers/order_provider.dart';
 
@@ -171,26 +172,27 @@ class _CourierMapFeedScreenState extends ConsumerState<CourierMapFeedScreen> {
             const SizedBox(height: 8),
             _buildAddressRow(Icons.flag, 'Dropoff', order.dropoffAddress, AppColors.gold),
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.navy,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            if (ref.watch(currentUserProvider).valueOrNull?.id != order.creatorId)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.navy,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => DeliveryDetailScreen(orderId: order.id)),
+                    );
+                    _fetchNearbyOrders();
+                  },
+                  child: const Text('View Details & Accept', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 ),
-                onPressed: () async {
-                  Navigator.pop(ctx);
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => DeliveryDetailScreen(orderId: order.id)),
-                  );
-                  _fetchNearbyOrders();
-                },
-                child: const Text('View Details & Accept', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ),
-            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -294,19 +296,21 @@ class _CourierMapFeedScreenState extends ConsumerState<CourierMapFeedScreen> {
                     leading: const Icon(Icons.local_shipping, color: AppColors.navy),
                     title: Text(order.itemType),
                     subtitle: Text('Pickup: ${order.pickupAddress}\nDropoff: ${order.dropoffAddress}'),
-                    trailing: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.gold,
-                      ),
-                      onPressed: () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => DeliveryDetailScreen(orderId: order.id)),
-                        );
-                        _fetchNearbyOrders();
-                      },
-                      child: const Text('View'),
-                    ),
+                    trailing: ref.watch(currentUserProvider).valueOrNull?.id == order.creatorId 
+                        ? const Text('Your Order', style: TextStyle(color: Colors.grey))
+                        : ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.gold,
+                            ),
+                            onPressed: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => DeliveryDetailScreen(orderId: order.id)),
+                              );
+                              _fetchNearbyOrders();
+                            },
+                            child: const Text('View'),
+                          ),
                   ),
                 );
               },

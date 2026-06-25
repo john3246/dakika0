@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../../core/constants/demo_mode.dart';
 import '../../../../core/models/user_model.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/services/websocket_service.dart';
@@ -16,9 +15,7 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
 // ── Current user (read from SharedPreferences after each login/logout) ────────
 // This is the single source of truth for the logged-in user object.
 final currentUserProvider = FutureProvider<UserModel?>((ref) async {
-  // ── DEMO MODE: return mock user without hitting SharedPrefs ───────────────
-  if (kDemoMode) return kDemoUser;
-  // ─────────────────────────────────────────────────────────────────────────
+
   final repo = ref.watch(authRepositoryProvider);
   return repo.getStoredUser();
 });
@@ -37,12 +34,7 @@ class AuthNotifier extends StateNotifier<AsyncValue<UserModel?>> {
       {bool isEmail = true}) async {
     state = const AsyncValue.loading();
     try {
-      // ── DEMO MODE: instant login with mock user ───────────────────────────
-      if (kDemoMode) {
-        state = AsyncValue.data(kDemoUser);
-        return;
-      }
-      // ─────────────────────────────────────────────────────────────────────
+
       final user =
           await _repository.login(identifier, password, isEmail: isEmail);
 
