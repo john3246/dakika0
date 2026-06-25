@@ -428,7 +428,7 @@ exports.updateOrderStatus = async (req, res) => {
 
   const VALID_STATUSES = ['accepted', 'picked_up', 'delivered', 'cancelled'];
   if (!VALID_STATUSES.includes(status)) {
-    return res.status(400).json({ error: 'Bad Request', message: \`Invalid status.\` });
+    return res.status(400).json({ error: 'Bad Request', message: 'Invalid status.' });
   }
 
   try {
@@ -438,11 +438,11 @@ exports.updateOrderStatus = async (req, res) => {
 
     // Allow Admins to arbitrarily update statuses for support purposes
     if (user.role.toUpperCase() === 'ADMIN') {
-      const updated = await db.query(\`UPDATE orders SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *\`, [status, id]);
+      const updated = await db.query(`UPDATE orders SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *`, [status, id]);
       if (updated.rows.length === 0) return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
       const camelOrder = toCamel(updated.rows[0]);
       wsManager.broadcastOrderEvent(camelOrder, 'order_' + status);
-      return res.json({ message: \`Order forced to \${status} by admin\`, order: camelOrder });
+      return res.json({ message: `Order forced to ${status} by admin`, order: camelOrder });
     }
 
     return res.status(403).json({ error: 'Forbidden', message: 'Please use the specific endpoints (accept, pickup, complete) instead' });
