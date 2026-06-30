@@ -30,7 +30,8 @@ exports.createOrder = async (req, res) => {
   const creatorId = req.user.id;
   const {
     pickupAddress, pickupLat, pickupLng,
-    dropoffAddress, dropoffLat, dropoffLng
+    dropoffAddress, dropoffLat, dropoffLng,
+    itemType, itemDescription, packageWeightKg
   } = req.body;
 
   if (!pickupAddress || !dropoffAddress || pickupLat == null || pickupLng == null || dropoffLat == null || dropoffLng == null) {
@@ -51,13 +52,15 @@ exports.createOrder = async (req, res) => {
       `INSERT INTO orders
          (id, creator_id, pickup_address, pickup_latitude, pickup_longitude,
           dropoff_address, dropoff_latitude, dropoff_longitude,
-          distance_km, total_price, qr_code_secure_string, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
+          distance_km, total_price, qr_code_secure_string, status,
+          item_type, item_description, package_weight_kg)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14)
        RETURNING *`,
       [
         orderId, creatorId, pickupAddress, pickupLat, pickupLng,
         dropoffAddress, dropoffLat, dropoffLng,
-        distanceKm, totalPrice, qrCodeSecureString
+        distanceKm, totalPrice, qrCodeSecureString,
+        itemType, itemDescription, packageWeightKg
       ]
     );
 
@@ -504,7 +507,7 @@ exports.rateOrder = async (req, res) => {
     if (!targetUserId) return res.status(400).json({ error: 'Bad Request', message: 'Target user not found' });
 
     await db.query(
-      `UPDATE users SET \${ratingColumn} = LEAST(5.00, GREATEST(1.00, ((\${ratingColumn} * 4) + $1) / 5.0)) WHERE id = $2`,
+      `UPDATE users SET ${ratingColumn} = LEAST(5.00, GREATEST(1.00, ((${ratingColumn} * 4) + $1) / 5.0)) WHERE id = $2`,
       [rating, targetUserId]
     );
 

@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:dakika0/features/profile/providers/profile_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +12,7 @@ import '../../../auth/providers/auth_provider.dart';
 import '../../../orders/presentation/screens/order_history_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'verification_wizard_screen.dart';
+import '../../../admin/presentation/screens/admin_dashboard_screen.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -184,6 +185,24 @@ class ProfileScreen extends ConsumerWidget {
                   ],
                 ),
             
+                if (profileData['role'] == 'ADMIN') ...[
+                  const SizedBox(height: 24),
+                  _buildProfileSection(
+                    context,
+                    title: 'System Administration',
+                    items: [
+                      _buildProfileItem(
+                        context,
+                        icon: Icons.admin_panel_settings,
+                        title: 'Super Admin Dashboard',
+                        onTap: () {
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminDashboardScreen()));
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+
                 const SizedBox(height: 32),
             
                 ListTile(

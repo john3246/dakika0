@@ -9,7 +9,7 @@ async function migrate() {
       ADD COLUMN IF NOT EXISTS nida_document_url TEXT,
       ADD COLUMN IF NOT EXISTS vehicle_type VARCHAR(20) CHECK (vehicle_type IN ('car', 'bike')),
       ADD COLUMN IF NOT EXISTS vehicle_registration_number VARCHAR(30) UNIQUE,
-      ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'user',
+      ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'CUSTOMER',
       ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
     `);
 
@@ -22,25 +22,32 @@ async function migrate() {
     `);
 
     await db.query(`
-      DROP TABLE IF EXISTS orders CASCADE;
-      CREATE TABLE orders (
-        id UUID PRIMARY KEY,
-        creator_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        courier_id UUID REFERENCES users(id) ON DELETE SET NULL,
-        status VARCHAR(20) DEFAULT 'pending',
-        pickup_latitude NUMERIC,
-        pickup_longitude NUMERIC,
-        dropoff_latitude NUMERIC,
-        dropoff_longitude NUMERIC,
-        pickup_address TEXT,
-        dropoff_address TEXT,
-        distance_km NUMERIC,
-        total_price NUMERIC,
-        qr_code_secure_string TEXT UNIQUE,
-        handoff_estimated_time TIMESTAMP,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
+      CREATE TABLE IF NOT EXISTS orders (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          creator_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          courier_id UUID REFERENCES users(id) ON DELETE SET NULL,
+          status VARCHAR(20) DEFAULT 'pending',
+          pickup_latitude NUMERIC(10, 7) NOT NULL,
+          pickup_longitude NUMERIC(10, 7) NOT NULL,
+          dropoff_latitude NUMERIC(10, 7) NOT NULL,
+          dropoff_longitude NUMERIC(10, 7) NOT NULL,
+          pickup_address TEXT NOT NULL,
+          dropoff_address TEXT NOT NULL,
+          distance_km NUMERIC(10, 2) NOT NULL,
+          total_price NUMERIC(10, 2) NOT NULL,
+          qr_code_secure_string VARCHAR(255) UNIQUE NOT NULL,
+          handoff_estimated_time TIMESTAMP,
+          item_type VARCHAR(255),
+          item_description TEXT,
+          package_weight_kg NUMERIC(10, 2),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+      
+      ALTER TABLE orders 
+      ADD COLUMN IF NOT EXISTS item_type VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS item_description TEXT,
+      ADD COLUMN IF NOT EXISTS package_weight_kg NUMERIC(10, 2);
     `);
 
     await db.query(`
@@ -50,7 +57,8 @@ async function migrate() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
-    console.log('Migration successful: Columns and constraints added/verified.');
+
+    console.log('Migration successful: Tables created or verified.');
 
     const checkAdmin = await db.query("SELECT id FROM users WHERE email = $1", ["admin@dakika0.com"]);
     if (checkAdmin.rows.length === 0) {
@@ -75,10 +83,12 @@ async function migrate() {
     } else {
       console.log('Super Admin user already exists.');
     }
+
+    process.exit(0);
   } catch (error) {
     console.error('Migration failed:', error.message);
+    process.exit(1);
   }
-  process.exit(0);
 }
 
 migrate();

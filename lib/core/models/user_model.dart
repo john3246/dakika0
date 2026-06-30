@@ -15,6 +15,11 @@ class UserModel {
   final String? selfieUrl;
   final String? vehicleType;
   final String? vehicleRegistrationNumber;
+  
+  final String role;
+  final bool isActive;
+  final DateTime? createdAt;
+  final bool? isVerified;
 
   const UserModel({
     required this.id,
@@ -31,6 +36,10 @@ class UserModel {
     this.selfieUrl,
     this.vehicleType,
     this.vehicleRegistrationNumber,
+    this.role = 'CUSTOMER',
+    this.isActive = true,
+    this.createdAt,
+    this.isVerified,
   });
 
   bool get isVerifiedCourier => isFullyVerified && courierStatus == 'verified';
@@ -51,6 +60,10 @@ class UserModel {
       selfieUrl:        json['selfieUrl'] as String?,
       vehicleType:      json['vehicleType'] as String?,
       vehicleRegistrationNumber: json['vehicleRegistrationNumber'] as String?,
+      role:             json['role'] as String? ?? 'CUSTOMER',
+      isActive:         json['isActive'] as bool? ?? true,
+      createdAt:        json['createdAt'] != null ? DateTime.tryParse(json['createdAt'].toString()) : null,
+      isVerified:       json['isVerified'] as bool?,
     );
   }
 
@@ -69,6 +82,10 @@ class UserModel {
     'selfieUrl':       selfieUrl,
     'vehicleType':     vehicleType,
     'vehicleRegistrationNumber': vehicleRegistrationNumber,
+    'role':            role,
+    'isActive':        isActive,
+    'createdAt':       createdAt?.toIso8601String(),
+    'isVerified':      isVerified,
   };
 
   UserModel copyWith({

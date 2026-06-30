@@ -215,7 +215,7 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
             ).animate().fadeIn(delay: 400.ms),
             const SizedBox(height: 30),
           ],
-          if (order.customerName != null && order.customerPhone != null) ...[
+          if (order.creatorName != null && order.creatorPhone != null) ...[
             _buildSectionTitle("Sender Information"),
             const SizedBox(height: 16),
             ListTile(
@@ -226,14 +226,14 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
                 child: Icon(Icons.person_outline, color: AppColors.navy),
               ),
               title: Text(
-                order.customerName!,
+                order.creatorName!,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               subtitle: Text(
-                '${order.customerRating?.toStringAsFixed(1) ?? '5.0'} ★ Sender Rating',
+                '${order.creatorRating?.toStringAsFixed(1) ?? '5.0'} ★ Sender Rating',
               ),
               trailing: IconButton(
-                onPressed: () => _launchDialer(order.customerPhone!),
+                onPressed: () => _launchDialer(order.creatorPhone!),
                 icon: const Icon(Icons.phone, color: Colors.green),
                 tooltip: 'Call Sender',
               ),

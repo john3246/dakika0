@@ -251,7 +251,7 @@ function handleWSEvent(data) {
       break;
       
     case 'order_broadcast':
-      logEvent('order', `New order broadcasted: [${data.order.itemType}] TZS ${data.order.estimatedPrice}`);
+      logEvent('order', `New order broadcasted: [${data.order.itemType}] TZS ${data.order.totalPrice}`);
       fetchStats();
       fetchOrders();
       updateOrderPin(data.order);
@@ -298,7 +298,7 @@ function updateOrderPin(order) {
   
   const latLng = [order.pickupLatitude, order.pickupLongitude];
   
-  if (order.status !== 'PENDING' && order.status !== 'ACCEPTED' && order.status !== 'PICKED_UP') {
+  if (order.status !== 'pending' && order.status !== 'accepted' && order.status !== 'picked_up') {
     // Remove completed/cancelled orders from active map tracking
     if (state.orderMarkers.has(order.id)) {
       map.removeLayer(state.orderMarkers.get(order.id));
@@ -316,8 +316,8 @@ function updateOrderPin(order) {
       <div style="font-family: Outfit; color: #0b132b">
         <h4 style="margin: 0 0 5px 0">${order.itemType}</h4>
         <p style="margin: 0; font-size: 11px; color: #666">Pickup: ${order.pickupAddress}</p>
-        <p style="margin: 0; font-size: 11px; color: #666">Fee: TZS ${parseFloat(order.estimatedPrice).toFixed(0)}</p>
-        <p style="margin: 5px 0 0 0; font-size: 11px; font-weight: bold; color: ${order.status === 'PENDING' ? '#f5a623' : '#3b82f6'}">Status: ${order.status}</p>
+        <p style="margin: 0; font-size: 11px; color: #666">Fee: TZS ${parseFloat(order.totalPrice || 0).toFixed(0)}</p>
+        <p style="margin: 5px 0 0 0; font-size: 11px; font-weight: bold; color: ${order.status === 'pending' ? '#f5a623' : '#3b82f6'}">Status: ${order.status}</p>
       </div>
     `);
     state.orderMarkers.set(order.id, marker);
@@ -563,10 +563,10 @@ function renderOrders() {
       <td><div style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${order.dropoffAddress}">${order.dropoffAddress}</div></td>
       <td>${order.itemType}</td>
       <td>${weight}</td>
-      <td>TZS ${parseFloat(order.estimatedPrice).toFixed(0)}</td>
+      <td>TZS ${parseFloat(order.totalPrice || 0).toFixed(0)}</td>
       <td><span class="status-badge status-${order.status}">${order.status}</span></td>
       <td>
-        ${(order.status !== 'DELIVERED' && order.status !== 'CANCELLED') ? `
+        ${(order.status !== 'delivered' && order.status !== 'cancelled') ? `
           <button class="btn btn-danger btn-sm" onclick="cancelOrder('${order.id}')">
             <i class="fa-solid fa-ban"></i> Cancel
           </button>

@@ -19,10 +19,10 @@ exports.getStats = async (req, res) => {
       "SELECT COUNT(*) FROM users u JOIN courier_profiles cp ON u.id = cp.user_id WHERE cp.is_verified = false"
     );
     const ordersCount = await db.query('SELECT COUNT(*) FROM orders');
-    const completedOrders = await db.query("SELECT COUNT(*) FROM orders WHERE status = 'DELIVERED'");
-    const activeOrders = await db.query("SELECT COUNT(*) FROM orders WHERE status IN ('ACCEPTED', 'PICKED_UP')");
+    const completedOrders = await db.query("SELECT COUNT(*) FROM orders WHERE status = 'delivered'");
+    const activeOrders = await db.query("SELECT COUNT(*) FROM orders WHERE status IN ('accepted', 'picked_up')");
     
-    const revenueResult = await db.query("SELECT SUM(estimated_price) as total FROM orders WHERE status = 'DELIVERED'");
+    const revenueResult = await db.query("SELECT SUM(total_price) as total FROM orders WHERE status = 'delivered'");
     const revenue = parseFloat(revenueResult.rows[0].total || 0);
 
     res.json({
@@ -182,7 +182,7 @@ exports.getOrders = async (req, res) => {
              c.name as customer_name, c.phone as customer_phone,
              co.name as courier_name, co.phone as courier_phone
       FROM orders o
-      JOIN users c ON o.customer_id = c.id
+      LEFT JOIN users c ON o.creator_id = c.id
       LEFT JOIN users co ON o.courier_id = co.id
       ORDER BY o.created_at DESC
     `);
@@ -198,7 +198,7 @@ exports.cancelOrder = async (req, res) => {
   const { id } = req.params;
   try {
     const result = await db.query(
-      `UPDATE orders SET status = 'CANCELLED', completed_at = NOW() WHERE id = $1 RETURNING *`,
+      `UPDATE orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1 RETURNING *`,
       [id]
     );
     if (result.rows.length === 0) {

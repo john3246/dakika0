@@ -138,7 +138,7 @@ class _RequestDeliveryScreenState
               hintText: context.tr('pickup_location'),
               prefixIcon: Icons.location_on_outlined,
               controller: _pickupController,
-              readOnly: true, // Auto-populated by GPS
+              readOnly: false, // Allow manual entry if GPS fails
             ),
 
             const SizedBox(height: 24),

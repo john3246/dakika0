@@ -46,13 +46,17 @@ class _OrderVerificationScreenState extends ConsumerState<OrderVerificationScree
   }
 
   void _calculateDistanceAndPrice() {
-    // Haversine formula
-    const double R = 6371; // Radius of Earth in km
-    final dLat = _deg2rad(widget.dropoffLat - widget.pickupLat);
-    final dLon = _deg2rad(widget.dropoffLng - widget.pickupLng);
-    final a =
-        math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(_deg2rad(widget.pickupLat)) * math.cos(_deg2rad(widget.dropoffLat)) *
+    // Ensure coordinates are numeric
+    final double pickupLat = double.tryParse(widget.pickupLat.toString()) ?? 0.0;
+    final double pickupLng = double.tryParse(widget.pickupLng.toString()) ?? 0.0;
+    final double dropoffLat = double.tryParse(widget.dropoffLat.toString()) ?? 0.0;
+    final double dropoffLng = double.tryParse(widget.dropoffLng.toString()) ?? 0.0;
+
+    const double R = 6371;
+    final dLat = _deg2rad(dropoffLat - pickupLat);
+    final dLon = _deg2rad(dropoffLng - pickupLng);
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(_deg2rad(pickupLat)) * math.cos(_deg2rad(dropoffLat)) *
         math.sin(dLon / 2) * math.sin(dLon / 2);
     final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
     _distanceKm = R * c;
