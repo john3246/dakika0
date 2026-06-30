@@ -88,20 +88,95 @@ class _OrderVerificationScreenState extends ConsumerState<OrderVerificationScree
       ref.invalidate(availableOrdersProvider);
 
       if (mounted) {
+        // ── ✅ Success Snackbar ───────────────────────────────────────────
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Order placed successfully!'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            backgroundColor: const Color(0xFF1E7D34),
+            content: const Row(
+              children: [
+                Text('🎉', style: TextStyle(fontSize: 22)),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Order Created Successfully!',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Your delivery has been broadcasted to nearby couriers.',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         );
-        // Pop back to home (pop verification, pop request)
+        // Pop back to home (pop verification screen, then request screen)
         Navigator.pop(context);
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
+        // ── ⚠️ Failure Snackbar ──────────────────────────────────────────
+        // Determine a user-friendly message; hide raw exception details.
+        final String errorMessage = e.toString().toLowerCase().contains('internet') ||
+                e.toString().toLowerCase().contains('network') ||
+                e.toString().toLowerCase().contains('connection') ||
+                e.toString().toLowerCase().contains('timeout')
+            ? 'No internet connection. Please check your network and try again.'
+            : "We couldn't reach the server. Please check your connection and try again.";
+
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            backgroundColor: const Color(0xFFB71C1C),
+            content: Row(
+              children: [
+                const Text('⚠️', style: TextStyle(fontSize: 22)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Verification Failed',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        errorMessage,
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       }
     } finally {

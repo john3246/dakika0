@@ -5,6 +5,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../../core/models/order_model.dart';
 import '../../../../core/services/location_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/empty_state_widget.dart';
 import '../../../auth/providers/auth_provider.dart';
 import '../../../delivery/presentation/screens/delivery_detail_screen.dart';
 import '../../../orders/providers/order_provider.dart';
@@ -24,6 +25,7 @@ class _CourierMapFeedScreenState extends ConsumerState<CourierMapFeedScreen> {
   List<OrderModel> _nearbyOrders = [];
   bool _isLoading = true;
   bool _showMap = true; // Toggle between map and list view
+  bool _hasError = false;
   Timer? _refreshTimer;
 
   @override
@@ -64,6 +66,8 @@ class _CourierMapFeedScreenState extends ConsumerState<CourierMapFeedScreen> {
   }
 
   Future<void> _fetchNearbyOrders() async {
+    // Reset error flag on each attempt
+    if (mounted) setState(() { _hasError = false; });
     try {
       final repo = ref.read(orderRepositoryProvider);
       final orders = await repo.getNearbyOrders(
@@ -75,12 +79,16 @@ class _CourierMapFeedScreenState extends ConsumerState<CourierMapFeedScreen> {
         setState(() {
           _nearbyOrders = orders;
           _isLoading = false;
+          _hasError = false;
           _buildMarkers();
         });
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+        });
       }
     }
   }
@@ -286,35 +294,63 @@ class _CourierMapFeedScreenState extends ConsumerState<CourierMapFeedScreen> {
         ],
       ) : _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              itemCount: _nearbyOrders.length,
-              itemBuilder: (context, index) {
-                final order = _nearbyOrders[index];
-                return Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: ListTile(
-                    leading: const Icon(Icons.local_shipping, color: AppColors.navy),
-                    title: Text(order.itemType),
-                    subtitle: Text('Pickup: ${order.pickupAddress}\nDropoff: ${order.dropoffAddress}'),
-                    trailing: ref.watch(currentUserProvider).valueOrNull?.id == order.creatorId 
-                        ? const Text('Your Order', style: TextStyle(color: Colors.grey))
-                        : ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.gold,
-                            ),
-                            onPressed: () async {
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (_) => DeliveryDetailScreen(orderId: order.id)),
-                              );
-                              _fetchNearbyOrders();
-                            },
-                            child: const Text('View'),
+          // ── Error state (list view) ────────────────────────────────────
+          : _hasError
+              ? EmptyStateWidget.error(
+                  onRetry: _fetchNearbyOrders,
+                  subtitle: 'Could not load nearby orders. Tap "Try Again" to retry.',
+                )
+              // ── Empty state (list view) ───────────────────────────────
+              : _nearbyOrders.isEmpty
+                  ? EmptyStateWidget(
+                      icon: Icons.delivery_dining_outlined,
+                      title: 'No active deliveries found right now',
+                      subtitle: 'Check back shortly — new orders are broadcasted in real time.',
+                      onRetry: _fetchNearbyOrders,
+                    )
+                  : ListView.builder(
+                      itemCount: _nearbyOrders.length,
+                      itemBuilder: (context, index) {
+                        final order = _nearbyOrders[index];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          child: ListTile(
+                            leading: const Icon(Icons.local_shipping, color: AppColors.navy),
+                            title: Text(order.itemType,
+                                style: const TextStyle(fontWeight: FontWeight.w600)),
+                            subtitle: Text(
+                                'Pickup: ${order.pickupAddress}\nDropoff: ${order.dropoffAddress}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis),
+                            isThreeLine: true,
+                            trailing: ref.watch(currentUserProvider).valueOrNull?.id ==
+                                    order.creatorId
+                                ? const Text('Your Order',
+                                    style: TextStyle(color: Colors.grey, fontSize: 12))
+                                : ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.gold,
+                                      foregroundColor: AppColors.navy,
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: () async {
+                                      await Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                            builder: (_) =>
+                                                DeliveryDetailScreen(orderId: order.id)),
+                                      );
+                                      _fetchNearbyOrders();
+                                    },
+                                    child: const Text('View',
+                                        style: TextStyle(fontWeight: FontWeight.bold)),
+                                  ),
                           ),
-                  ),
-                );
-              },
-            ),
+                        );
+                      },
+                    ),
     );
   }
 }

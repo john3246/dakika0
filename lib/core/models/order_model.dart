@@ -101,41 +101,60 @@ class OrderModel {
   double get displayPrice => suggestedPrice ?? totalPrice;
 
   factory OrderModel.fromJson(Map<String, dynamic> json) {
-    return OrderModel(
-      id:             json['id']         as String,
-      creatorId:      json['creatorId']  as String,
-      courierId:      json['courierId']  as String?,
-      status:         (json['status']     as String).toUpperCase(),
+    // Helper: safely parse a DateTime string, returning a fallback if null/invalid.
+    DateTime _parseDate(dynamic val, {DateTime? fallback}) {
+      if (val == null) return fallback ?? DateTime.now();
+      try { return DateTime.parse(val as String); } catch (_) { return fallback ?? DateTime.now(); }
+    }
 
-      pickupAddress:   json['pickupAddress']   as String,
+    return OrderModel(
+      id:             (json['id'] as String?) ?? '',
+      creatorId:      (json['creatorId'] as String?) ?? '',
+      courierId:      json['courierId'] as String?,
+      // DB stores lowercase; normalise to UPPER for status comparisons throughout the app.
+      status:         ((json['status'] as String?) ?? 'PENDING').toUpperCase(),
+
+      pickupAddress:   (json['pickupAddress']  as String?) ?? '',
       pickupLatitude:  (json['pickupLatitude']  as num?)?.toDouble() ?? 0.0,
       pickupLongitude: (json['pickupLongitude'] as num?)?.toDouble() ?? 0.0,
 
-      dropoffAddress:   json['dropoffAddress']   as String,
+      dropoffAddress:   (json['dropoffAddress']   as String?) ?? '',
       dropoffLatitude:  (json['dropoffLatitude']  as num?)?.toDouble() ?? 0.0,
       dropoffLongitude: (json['dropoffLongitude'] as num?)?.toDouble() ?? 0.0,
 
-      itemType:         json['itemType']         as String,
-      itemDescription:  json['itemDescription']  as String?,
-      packageWeightKg:  json['packageWeightKg'] != null ? double.tryParse(json['packageWeightKg'].toString()) : null,
-      distanceKm:       json['distanceKm'] != null ? double.tryParse(json['distanceKm'].toString()) : null,
-      totalPrice:       double.tryParse(json['totalPrice'].toString()) ?? 0.0,
-      suggestedPrice:   json['suggestedPrice'] != null ? double.tryParse(json['suggestedPrice'].toString()) : null,
+      itemType:         (json['itemType']        as String?) ?? 'Package',
+      itemDescription:  json['itemDescription'] as String?,
+      packageWeightKg:  json['packageWeightKg'] != null
+          ? double.tryParse(json['packageWeightKg'].toString())
+          : null,
+      distanceKm:       json['distanceKm'] != null
+          ? double.tryParse(json['distanceKm'].toString())
+          : null,
+      totalPrice:       double.tryParse(json['totalPrice']?.toString() ?? '0') ?? 0.0,
+      suggestedPrice:   json['suggestedPrice'] != null
+          ? double.tryParse(json['suggestedPrice'].toString())
+          : null,
       qrCodeSecureString: json['qrCodeSecureString'] as String?,
-      handoffEstimatedTime: json['handoffEstimatedTime'] != null ? DateTime.parse(json['handoffEstimatedTime'] as String) : null,
-      cancelReason:     json['cancelReason']     as String?,
+      handoffEstimatedTime: json['handoffEstimatedTime'] != null
+          ? _parseDate(json['handoffEstimatedTime'])
+          : null,
+      cancelReason:     json['cancelReason'] as String?,
 
-      createdAt:   DateTime.parse(json['createdAt']  as String),
-      acceptedAt:  json['acceptedAt']  != null ? DateTime.parse(json['acceptedAt']  as String) : null,
-      pickedUpAt:  json['pickedUpAt']  != null ? DateTime.parse(json['pickedUpAt']  as String) : null,
-      completedAt: json['completedAt'] != null ? DateTime.parse(json['completedAt'] as String) : null,
+      createdAt:   _parseDate(json['createdAt']),
+      acceptedAt:  json['acceptedAt']  != null ? _parseDate(json['acceptedAt'])  : null,
+      pickedUpAt:  json['pickedUpAt']  != null ? _parseDate(json['pickedUpAt'])  : null,
+      completedAt: json['completedAt'] != null ? _parseDate(json['completedAt']) : null,
 
-      creatorName:       json['creatorName']       as String?,
-      creatorPhone:      json['creatorPhone']      as String?,
-      creatorRating:     json['creatorRating'] != null ? double.tryParse(json['creatorRating'].toString()) : null,
-      courierName:       json['courierName']       as String?,
-      courierPhone:      json['courierPhone']      as String?,
-      courierRating:     json['courierRating'] != null ? double.tryParse(json['courierRating'].toString()) : null,
+      creatorName:       json['creatorName']  as String?,
+      creatorPhone:      json['creatorPhone'] as String?,
+      creatorRating:     json['creatorRating'] != null
+          ? double.tryParse(json['creatorRating'].toString())
+          : null,
+      courierName:       json['courierName']  as String?,
+      courierPhone:      json['courierPhone'] as String?,
+      courierRating:     json['courierRating'] != null
+          ? double.tryParse(json['courierRating'].toString())
+          : null,
       courierIsVerified: json['courierIsVerified'] as bool?,
       courierLatitude:   (json['courierLatitude']  as num?)?.toDouble(),
       courierLongitude:  (json['courierLongitude'] as num?)?.toDouble(),

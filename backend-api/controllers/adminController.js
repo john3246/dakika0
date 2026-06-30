@@ -179,7 +179,7 @@ exports.getOrders = async (req, res) => {
   try {
     const result = await db.query(`
       SELECT o.*, 
-             c.name as customer_name, c.phone as customer_phone,
+             c.name as creator_name, c.phone as creator_phone,
              co.name as courier_name, co.phone as courier_phone
       FROM orders o
       LEFT JOIN users c ON o.creator_id = c.id
