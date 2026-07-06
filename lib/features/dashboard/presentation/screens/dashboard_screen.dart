@@ -18,6 +18,8 @@ import '../../../delivery/presentation/screens/active_deliveries_screen.dart';
 import '../../../delivery/presentation/screens/delivery_detail_screen.dart';
 import '../../../profile/presentation/screens/profile_screen.dart';
 
+enum DashboardTab { home, mapFeed, delivery, profile }
+
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
@@ -26,7 +28,7 @@ class DashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
-  int _currentIndex = 0;
+  DashboardTab _currentTab = DashboardTab.home;
   StreamSubscription? _wsEventSubscription;
 
   @override
@@ -95,8 +97,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
   }
 
-  void _onTabTapped(int index) {
-    setState(() => _currentIndex = index);
+  void _onTabTapped(DashboardTab tab) {
+    setState(() => _currentTab = tab);
     // Refresh data when switching tabs so lists are always fresh
     ref.invalidate(myActiveOrdersProvider);
     ref.invalidate(orderStatsProvider);
@@ -110,15 +112,37 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final user = currentUserAsync.valueOrNull;
     final isVerified = user?.isFullyVerified ?? false;
 
-    final List<Widget> screens = [
-      const HomeScreen(),
-      if (isVerified) const CourierMapFeedScreen(),
-      const ActiveDeliveriesScreen(),
-      const ProfileScreen(),
+    // Define the tabs available in the current user context
+    final activeTabs = [
+      DashboardTab.home,
+      if (isVerified) DashboardTab.mapFeed,
+      DashboardTab.delivery,
+      DashboardTab.profile,
     ];
 
+    // Fallback to home if the current tab is no longer available (e.g. unverified)
+    if (!activeTabs.contains(_currentTab)) {
+      _currentTab = DashboardTab.home;
+    }
+
+    final currentIndex = activeTabs.indexOf(_currentTab);
+
+    // Build list of screen widgets corresponding to active tabs
+    final List<Widget> screens = activeTabs.map((tab) {
+      switch (tab) {
+        case DashboardTab.home:
+          return const HomeScreen();
+        case DashboardTab.mapFeed:
+          return const CourierMapFeedScreen();
+        case DashboardTab.delivery:
+          return const ActiveDeliveriesScreen();
+        case DashboardTab.profile:
+          return const ProfileScreen();
+      }
+    }).toList();
+
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: screens),
+      body: IndexedStack(index: currentIndex, children: screens),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           boxShadow: [
@@ -130,37 +154,42 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ],
         ),
         child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: _onTabTapped,
+          currentIndex: currentIndex,
+          onTap: (index) => _onTabTapped(activeTabs[index]),
           backgroundColor: isDark ? AppColors.navy : AppColors.white,
           selectedItemColor: isDark ? AppColors.gold : AppColors.navy,
           unselectedItemColor: Colors.grey,
           showSelectedLabels: true,
           showUnselectedLabels: true,
           type: BottomNavigationBarType.fixed,
-          items: [
-            const BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: 'Home',
-            ),
-            if (isVerified)
-              const BottomNavigationBarItem(
-                icon: Icon(Icons.map_outlined),
-                activeIcon: Icon(Icons.map),
-                label: 'Map Feed',
-              ),
-            BottomNavigationBarItem(
-              icon: const Icon(Icons.delivery_dining_outlined),
-              activeIcon: const Icon(Icons.delivery_dining),
-              label: context.tr('delivery'),
-            ),
-            BottomNavigationBarItem(
-              icon: const Icon(Icons.person_outline),
-              activeIcon: const Icon(Icons.person),
-              label: context.tr('profile'),
-            ),
-          ],
+          items: activeTabs.map((tab) {
+            switch (tab) {
+              case DashboardTab.home:
+                return const BottomNavigationBarItem(
+                  icon: Icon(Icons.home_outlined),
+                  activeIcon: Icon(Icons.home),
+                  label: 'Home',
+                );
+              case DashboardTab.mapFeed:
+                return const BottomNavigationBarItem(
+                  icon: Icon(Icons.map_outlined),
+                  activeIcon: Icon(Icons.map),
+                  label: 'Map Feed',
+                );
+              case DashboardTab.delivery:
+                return BottomNavigationBarItem(
+                  icon: const Icon(Icons.delivery_dining_outlined),
+                  activeIcon: const Icon(Icons.delivery_dining),
+                  label: context.tr('delivery'),
+                );
+              case DashboardTab.profile:
+                return BottomNavigationBarItem(
+                  icon: const Icon(Icons.person_outline),
+                  activeIcon: const Icon(Icons.person),
+                  label: context.tr('profile'),
+                );
+            }
+          }).toList(),
         ),
       ),
     );

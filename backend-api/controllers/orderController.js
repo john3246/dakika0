@@ -75,6 +75,7 @@ exports.createOrder = async (req, res) => {
     itemType,
     itemDescription,
     packageWeightKg,
+    suggestedPrice,
   } = req.body;
 
   if (
@@ -108,8 +109,8 @@ exports.createOrder = async (req, res) => {
          (id, creator_id, pickup_address, pickup_latitude, pickup_longitude,
           dropoff_address, dropoff_latitude, dropoff_longitude,
           distance_km, total_price, qr_code_secure_string, status,
-          item_type, item_description, package_weight_kg)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14)
+          item_type, item_description, package_weight_kg, suggested_price)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14, $15)
        RETURNING *`,
       [
         orderId,
@@ -126,6 +127,7 @@ exports.createOrder = async (req, res) => {
         itemType || null,
         itemDescription || null,
         packageWeightKg || null,
+        suggestedPrice || null,
       ]
     );
 
