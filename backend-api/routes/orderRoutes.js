@@ -7,6 +7,7 @@ const {
   acceptOrder,
   pickupOrder,
   completeOrder,
+  getOrders,
   getMyOrders,
   getAvailableOrders,
   getOrderById,
@@ -28,7 +29,12 @@ router.post('/complete', requireRole('COURIER'), completeOrder);
 
 // Standard/Compatibility routes
 router.post('/', requireRole('CUSTOMER'), createOrder);
+
+// Data visibility endpoints
+router.get('/', getOrders);
+router.get('/history', getOrders);
 router.get('/mine', getMyOrders);
+
 router.get('/stats', getMyStats);
 router.get('/available', getAvailableOrders);
 router.get('/nearby', getNearbyOrders);

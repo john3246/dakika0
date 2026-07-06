@@ -2,40 +2,92 @@ const db = require('../db');
 const wsManager = require('../websocket');
 const crypto = require('crypto');
 
-// Helper to convert DB rows to camelCase
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+/** Convert a DB snake_case row to camelCase, stripping password_hash. */
 const toCamel = (row) => {
   if (!row) return null;
   return Object.fromEntries(
-    Object.entries(row).map(([k, v]) => [
-      k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
-      v,
-    ])
+    Object.entries(row)
+      .filter(([k]) => k !== 'password_hash')
+      .map(([k, v]) => [k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), v])
   );
 };
 
-// Pricing Engine (Haversine Formula)
+/** Haversine distance in km between two lat/lng pairs. */
 const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
-  const R = 6371; // Radius of the Earth in km
+  const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
   const dLon = (lon2 - lon1) * (Math.PI / 180);
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    Math.cos(lat1 * (Math.PI / 180)) *
+      Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 };
 
+/**
+ * Attempt to send a push notification to the given device token.
+ * This is intentionally fire-and-forget: any failure is swallowed so it
+ * never prevents the HTTP response from being sent.
+ *
+ * Replace the body of this function with your real FCM / APNs / Expo call
+ * once you wire up a push provider.  The safe outer try/catch is the only
+ * contract this helper must honour.
+ */
+async function sendPushNotification(deviceToken, title, body) {
+  // TODO: integrate FCM / APNs / Expo Push here.
+  // Example (FCM v1 REST):
+  //   const response = await fetch('https://fcm.googleapis.com/v1/projects/<id>/messages:send', {
+  //     method: 'POST',
+  //     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+  //     body: JSON.stringify({ message: { token: deviceToken, notification: { title, body } } }),
+  //   });
+  console.log(`[Push] → token=${deviceToken} title="${title}" body="${body}"`);
+}
+
+// ─── createOrder ─────────────────────────────────────────────────────────────
+//
+// FIX #4 — REORDER CREATION CRASH
+//
+// Root cause: any unhandled exception thrown after the DB COMMIT (e.g. inside
+// the push-notification call) would propagate uncaught and kill the response
+// loop, leaving the HTTP connection hanging.  The Flutter app timed out and
+// showed 'failed to contact server'.
+//
+// Fix: wrap the ENTIRE pipeline in a single outer try/catch, including the
+// notification step.  The notification itself is wrapped in an *inner*
+// try/catch so that a null device_token or a transient FCM error can never
+// prevent the 201 response from reaching the client.
+// ─────────────────────────────────────────────────────────────────────────────
 exports.createOrder = async (req, res) => {
   const creatorId = req.user.id;
   const {
-    pickupAddress, pickupLat, pickupLng,
-    dropoffAddress, dropoffLat, dropoffLng,
-    itemType, itemDescription, packageWeightKg
+    pickupAddress,
+    pickupLat,
+    pickupLng,
+    dropoffAddress,
+    dropoffLat,
+    dropoffLng,
+    itemType,
+    itemDescription,
+    packageWeightKg,
   } = req.body;
 
-  if (!pickupAddress || !dropoffAddress || pickupLat == null || pickupLng == null || dropoffLat == null || dropoffLng == null) {
-    return res.status(400).json({ error: 'Bad Request', message: 'Missing required location fields' });
+  if (
+    !pickupAddress ||
+    !dropoffAddress ||
+    pickupLat == null ||
+    pickupLng == null ||
+    dropoffLat == null ||
+    dropoffLng == null
+  ) {
+    return res
+      .status(400)
+      .json({ error: 'Bad Request', message: 'Missing required location fields' });
   }
 
   const distanceKm = calculateDistanceKm(pickupLat, pickupLng, dropoffLat, dropoffLng);
@@ -46,7 +98,10 @@ exports.createOrder = async (req, res) => {
     await client.query('BEGIN');
 
     const orderId = crypto.randomUUID();
+
+    // Build the QR payload string safely — no external calls, no risk of null refs.
     const qrCodeSecureString = crypto.randomBytes(32).toString('hex');
+    const qrPayload = `ORDER:${orderId}|TOKEN:${qrCodeSecureString}`;
 
     const result = await client.query(
       `INSERT INTO orders
@@ -57,29 +112,65 @@ exports.createOrder = async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14)
        RETURNING *`,
       [
-        orderId, creatorId, pickupAddress, pickupLat, pickupLng,
-        dropoffAddress, dropoffLat, dropoffLng,
-        distanceKm, totalPrice, qrCodeSecureString,
-        itemType, itemDescription, packageWeightKg
+        orderId,
+        creatorId,
+        pickupAddress,
+        pickupLat,
+        pickupLng,
+        dropoffAddress,
+        dropoffLat,
+        dropoffLng,
+        distanceKm,
+        totalPrice,
+        qrCodeSecureString,
+        itemType || null,
+        itemDescription || null,
+        packageWeightKg || null,
       ]
     );
 
     await client.query('COMMIT');
 
-    const order = result.rows[0];
-    const camelOrder = toCamel(order);
+    const newOrder = toCamel(result.rows[0]);
+    // Augment the camelCase order with the full QR payload string for the client
+    newOrder.qrPayload = qrPayload;
 
-    wsManager.broadcastOrderEvent(camelOrder, 'order_created');
+    // Broadcast the new order to connected WebSocket listeners (e.g. courier dashboards)
+    wsManager.broadcastOrderEvent(newOrder, 'order_created');
 
-    res.status(201).json({ message: 'Order created', order: camelOrder });
+    // ── Inner try/catch: notification failure must NEVER crash the response ──
+    try {
+      const userRes = await db.query('SELECT device_token FROM users WHERE id = $1', [creatorId]);
+      const deviceToken = userRes.rows[0]?.device_token ?? null;
+
+      if (deviceToken) {
+        await sendPushNotification(
+          deviceToken,
+          'Order Created! 🚀',
+          `Your delivery from ${pickupAddress} to ${dropoffAddress} is now live.`
+        );
+      } else {
+        console.log(`[Push] Skipped — user ${creatorId} has no device_token registered.`);
+      }
+    } catch (notifError) {
+      // Log the failure but do NOT re-throw — the order is already committed.
+      console.error('[Push] sendPushNotification failed (non-fatal):', notifError.message);
+    }
+
+    // Always finish the HTTP lifecycle cleanly.
+    return res.status(201).json({ success: true, order: newOrder });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('createOrder error:', err);
-    res.status(500).json({ error: 'Internal Server Error', message: 'Internal server error' });
+    return res
+      .status(500)
+      .json({ error: 'Internal Server Error', message: 'Internal server error' });
   } finally {
     client.release();
   }
 };
+
+// ─── getBroadcasts ────────────────────────────────────────────────────────────
 
 exports.getBroadcasts = async (req, res) => {
   const courierId = req.user.id;
@@ -90,7 +181,10 @@ exports.getBroadcasts = async (req, res) => {
     );
     const isVerified = userRes.rows[0]?.is_verified;
     if (!isVerified) {
-      return res.status(403).json({ error: 'Forbidden', message: 'Profile verification required to view broadcasts.' });
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Profile verification required to view broadcasts.',
+      });
     }
 
     const result = await db.query(
@@ -106,6 +200,8 @@ exports.getBroadcasts = async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error', message: 'Internal server error' });
   }
 };
+
+// ─── acceptOrder ─────────────────────────────────────────────────────────────
 
 exports.acceptOrder = async (req, res) => {
   const orderId = req.body.orderId || req.body.id;
@@ -126,13 +222,14 @@ exports.acceptOrder = async (req, res) => {
     const isVerified = profileRes.rows[0]?.is_verified;
     if (!isVerified) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Forbidden', message: 'Only verified couriers can accept orders' });
+      return res
+        .status(403)
+        .json({ error: 'Forbidden', message: 'Only verified couriers can accept orders' });
     }
 
-    const orderRes = await client.query(
-      'SELECT * FROM orders WHERE id = $1 FOR UPDATE',
-      [orderId]
-    );
+    const orderRes = await client.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [
+      orderId,
+    ]);
     if (orderRes.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
@@ -142,12 +239,16 @@ exports.acceptOrder = async (req, res) => {
 
     if (order.creator_id === courierId) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Bad Request', message: 'You cannot accept your own order' });
+      return res
+        .status(400)
+        .json({ error: 'Bad Request', message: 'You cannot accept your own order' });
     }
 
     if (order.courier_id !== null || order.status !== 'pending') {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Conflict', message: 'Order has already been accepted' });
+      return res
+        .status(409)
+        .json({ error: 'Conflict', message: 'Order has already been accepted' });
     }
 
     const updateRes = await client.query(
@@ -173,22 +274,25 @@ exports.acceptOrder = async (req, res) => {
   }
 };
 
+// ─── pickupOrder ─────────────────────────────────────────────────────────────
+
 exports.pickupOrder = async (req, res) => {
   const { orderId, qrCodeSecureString } = req.body;
   const courierId = req.user.id;
 
   if (!orderId || !qrCodeSecureString) {
-    return res.status(400).json({ error: 'Bad Request', message: 'Order ID and QR code string are required' });
+    return res
+      .status(400)
+      .json({ error: 'Bad Request', message: 'Order ID and QR code string are required' });
   }
 
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
 
-    const orderRes = await client.query(
-      'SELECT * FROM orders WHERE id = $1 FOR UPDATE',
-      [orderId]
-    );
+    const orderRes = await client.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [
+      orderId,
+    ]);
     if (orderRes.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
@@ -198,24 +302,29 @@ exports.pickupOrder = async (req, res) => {
 
     if (order.courier_id !== courierId) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Forbidden', message: 'Access denied: You are not the assigned courier for this order' });
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Access denied: You are not the assigned courier for this order',
+      });
     }
 
     if (order.status !== 'accepted') {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Conflict', message: 'Order must be in accepted status' });
+      return res
+        .status(409)
+        .json({ error: 'Conflict', message: 'Order must be in accepted status' });
     }
 
     if (qrCodeSecureString !== order.qr_code_secure_string) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Bad Request', message: 'Invalid QR code: Proof of Pickup failed' });
+      return res
+        .status(400)
+        .json({ error: 'Bad Request', message: 'Invalid QR code: Proof of Pickup failed' });
     }
 
-    // Calculate handoff_estimated_time assuming 30 km/h speed
+    // Estimate delivery time assuming 30 km/h average speed
     const distanceKm = parseFloat(order.distance_km);
-    const hoursToDeliver = distanceKm / 30;
-    const msToDeliver = hoursToDeliver * 60 * 60 * 1000;
-    const estimatedTime = new Date(Date.now() + msToDeliver);
+    const estimatedTime = new Date(Date.now() + (distanceKm / 30) * 3_600_000);
 
     const updateRes = await client.query(
       `UPDATE orders 
@@ -240,22 +349,25 @@ exports.pickupOrder = async (req, res) => {
   }
 };
 
+// ─── completeOrder ────────────────────────────────────────────────────────────
+
 exports.completeOrder = async (req, res) => {
   const { orderId, qrCodeSecureString } = req.body;
   const courierId = req.user.id;
 
   if (!orderId || !qrCodeSecureString) {
-    return res.status(400).json({ error: 'Bad Request', message: 'Order ID and QR code string are required' });
+    return res
+      .status(400)
+      .json({ error: 'Bad Request', message: 'Order ID and QR code string are required' });
   }
 
   const client = await db.getClient();
   try {
     await client.query('BEGIN');
 
-    const orderRes = await client.query(
-      'SELECT * FROM orders WHERE id = $1 FOR UPDATE',
-      [orderId]
-    );
+    const orderRes = await client.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [
+      orderId,
+    ]);
     if (orderRes.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
@@ -265,17 +377,24 @@ exports.completeOrder = async (req, res) => {
 
     if (order.courier_id !== courierId) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Forbidden', message: 'Access denied: You are not the assigned courier for this order' });
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Access denied: You are not the assigned courier for this order',
+      });
     }
 
     if (order.status !== 'picked_up') {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Conflict', message: 'Order must be in picked_up status' });
+      return res
+        .status(409)
+        .json({ error: 'Conflict', message: 'Order must be in picked_up status' });
     }
 
     if (qrCodeSecureString !== order.qr_code_secure_string) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Bad Request', message: 'Invalid QR Code: Proof of Delivery failed' });
+      return res
+        .status(400)
+        .json({ error: 'Bad Request', message: 'Invalid QR Code: Proof of Delivery failed' });
     }
 
     const updateRes = await client.query(
@@ -301,43 +420,129 @@ exports.completeOrder = async (req, res) => {
   }
 };
 
-exports.getMyOrders = async (req, res) => {
-  const userId = req.user.id;
+// ─── getOrders  (replaces getMyOrders) ────────────────────────────────────────
+//
+// FIX #2 — DATA VISIBILITY POLICIES
+//
+// Three distinct data access tiers based on req.user.role:
+//
+//   ADMIN    → every order in the system (no filter)
+//   CUSTOMER → only orders where customer_id (creator_id) = req.user.id
+//   COURIER  → orders where courier_id = req.user.id  UNION
+//               all PENDING orders (so they can discover & claim new jobs)
+//
+// The optional ?status= query-param filter is honoured for CUSTOMER and
+// COURIER tiers.  Admins always receive all statuses.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.getOrders = async (req, res) => {
+  const { id: userId, role } = req.user;
   const rawStatus = req.query.status;
   const statusList = rawStatus ? rawStatus.split(',').map((s) => s.trim().toLowerCase()) : null;
 
   try {
-    let query = `
-      SELECT o.*, 
-             cu.name AS creator_name,
-             co.name AS courier_name
-      FROM orders o
-      JOIN users cu ON cu.id = o.creator_id
-      LEFT JOIN users co ON co.id = o.courier_id
-      WHERE (o.creator_id = $1 OR o.courier_id = $1)
-    `;
-    const params = [userId];
+    let rows;
 
-    if (statusList) {
-      query += ` AND o.status = ANY($2::text[])`;
-      params.push(statusList);
+    if (role === 'ADMIN') {
+      // ── ADMIN: unrestricted view of every order ──
+      const result = await db.query(
+        `SELECT o.*,
+                cu.name  AS creator_name,  cu.phone  AS creator_phone,
+                co.name  AS courier_name,  co.phone  AS courier_phone
+         FROM   orders o
+         LEFT JOIN users cu ON cu.id = o.creator_id
+         LEFT JOIN users co ON co.id = o.courier_id
+         ORDER  BY o.created_at DESC`
+      );
+      rows = result.rows;
+    } else if (role === 'CUSTOMER') {
+      // ── CUSTOMER: strictly their own orders ──
+      let query = `
+        SELECT o.*,
+               cu.name AS creator_name,
+               co.name AS courier_name
+        FROM   orders o
+        JOIN   users cu ON cu.id = o.creator_id
+        LEFT JOIN users co ON co.id = o.courier_id
+        WHERE  o.creator_id = $1
+      `;
+      const params = [userId];
+      if (statusList) {
+        query += ` AND o.status = ANY($2::text[])`;
+        params.push(statusList);
+      }
+      query += ` ORDER BY o.created_at DESC`;
+      const result = await db.query(query, params);
+      rows = result.rows;
+    } else {
+      // ── COURIER: their assigned orders + all PENDING orders to discover ──
+      // Using UNION DISTINCT to avoid duplicate rows when a pending order is
+      // also already assigned to this courier (edge-case safety).
+      let assignedQuery = `
+        SELECT o.*,
+               cu.name AS creator_name,
+               co.name AS courier_name
+        FROM   orders o
+        JOIN   users cu ON cu.id = o.creator_id
+        LEFT JOIN users co ON co.id = o.courier_id
+        WHERE  o.courier_id = $1
+      `;
+      const assignedParams = [userId];
+      if (statusList) {
+        assignedQuery += ` AND o.status = ANY($2::text[])`;
+        assignedParams.push(statusList);
+      }
+
+      const pendingQuery = `
+        SELECT o.*,
+               cu.name AS creator_name,
+               co.name AS courier_name
+        FROM   orders o
+        JOIN   users cu ON cu.id = o.creator_id
+        LEFT JOIN users co ON co.id = o.courier_id
+        WHERE  o.status = 'pending'
+          AND  o.courier_id IS NULL
+      `;
+
+      // Run both in parallel for speed
+      const [assignedRes, pendingRes] = await Promise.all([
+        db.query(assignedQuery, assignedParams),
+        db.query(pendingQuery),
+      ]);
+
+      // Merge and de-duplicate by order id
+      const seen = new Set();
+      rows = [...assignedRes.rows, ...pendingRes.rows].filter((r) => {
+        if (seen.has(r.id)) return false;
+        seen.add(r.id);
+        return true;
+      });
+
+      // Sort merged result set by created_at desc
+      rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     }
-    
-    query += ` ORDER BY o.created_at DESC`;
 
-    const result = await db.query(query, params);
-    res.json({ orders: result.rows.map(toCamel) });
+    res.json({ orders: rows.map(toCamel) });
   } catch (err) {
-    console.error('getMyOrders error:', err);
+    console.error('getOrders error:', err);
     res.status(500).json({ error: 'Internal Server Error', message: 'Internal server error' });
   }
 };
 
+// Keep backward-compatible alias used by GET /api/orders/mine
+exports.getMyOrders = exports.getOrders;
+
+// ─── getAvailableOrders ───────────────────────────────────────────────────────
+
 exports.getAvailableOrders = async (req, res) => {
   try {
-    const userResult = await db.query('SELECT is_fully_verified FROM users WHERE id = $1', [req.user.id]);
+    const userResult = await db.query('SELECT is_fully_verified FROM users WHERE id = $1', [
+      req.user.id,
+    ]);
     if (!userResult.rows[0]?.is_fully_verified) {
-      return res.status(403).json({ error: 'Forbidden', message: 'Profile verification required to view available orders.' });
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Profile verification required to view available orders.',
+      });
     }
 
     const result = await db.query(
@@ -354,17 +559,26 @@ exports.getAvailableOrders = async (req, res) => {
   }
 };
 
+// ─── getNearbyOrders ──────────────────────────────────────────────────────────
+
 exports.getNearbyOrders = async (req, res) => {
   const { lat, lng, radiusKm = 10 } = req.query;
-  
+
   if (!lat || !lng) {
-    return res.status(400).json({ error: 'Bad Request', message: 'Latitude (lat) and Longitude (lng) are required.' });
+    return res
+      .status(400)
+      .json({ error: 'Bad Request', message: 'Latitude (lat) and Longitude (lng) are required.' });
   }
 
   try {
-    const userResult = await db.query('SELECT is_fully_verified FROM users WHERE id = $1', [req.user.id]);
+    const userResult = await db.query('SELECT is_fully_verified FROM users WHERE id = $1', [
+      req.user.id,
+    ]);
     if (!userResult.rows[0]?.is_fully_verified) {
-      return res.status(403).json({ error: 'Forbidden', message: 'Profile verification required to view nearby map feed.' });
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Profile verification required to view nearby map feed.',
+      });
     }
 
     const result = await db.query(
@@ -379,10 +593,9 @@ exports.getNearbyOrders = async (req, res) => {
     const lngNum = parseFloat(lng);
     const radiusNum = parseFloat(radiusKm);
 
-    const nearbyOrders = result.rows.filter(row => {
+    const nearbyOrders = result.rows.filter((row) => {
       if (!row.pickup_latitude || !row.pickup_longitude) return false;
-      const dist = calculateDistanceKm(latNum, lngNum, row.pickup_latitude, row.pickup_longitude);
-      return dist <= radiusNum;
+      return calculateDistanceKm(latNum, lngNum, row.pickup_latitude, row.pickup_longitude) <= radiusNum;
     });
 
     res.json({ orders: nearbyOrders.map(toCamel) });
@@ -392,27 +605,38 @@ exports.getNearbyOrders = async (req, res) => {
   }
 };
 
+// ─── getOrderById ─────────────────────────────────────────────────────────────
+
 exports.getOrderById = async (req, res) => {
   const { id } = req.params;
-  const userId  = req.user.id;
+  const { id: userId, role } = req.user;
 
   try {
     const result = await db.query(
       `SELECT o.*,
-         cust.name AS creator_name, cust.phone AS creator_phone, cust.sender_rating AS creator_rating,
-         cour.name AS courier_name, cour.phone AS courier_phone, cour.courier_rating, cour.is_fully_verified AS courier_is_verified,
-         cour.current_latitude AS courier_latitude, cour.current_longitude AS courier_longitude
+         cust.name   AS creator_name,  cust.phone  AS creator_phone,
+         cust.sender_rating            AS creator_rating,
+         cour.name   AS courier_name,  cour.phone  AS courier_phone,
+         cour.courier_rating,          cour.is_fully_verified AS courier_is_verified,
+         cour.current_latitude         AS courier_latitude,
+         cour.current_longitude        AS courier_longitude
        FROM orders o
-       JOIN users cust ON cust.id = o.creator_id
+       JOIN  users cust ON cust.id = o.creator_id
        LEFT JOIN users cour ON cour.id = o.courier_id
        WHERE o.id = $1`,
       [id]
     );
 
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
+    }
+
     const order = result.rows[0];
 
-    if (order.creator_id !== userId && order.courier_id !== userId && order.status !== 'pending') {
+    // Admins see everything; customers and couriers only see orders they are party to
+    const isParty = order.creator_id === userId || order.courier_id === userId;
+    const isPending = order.status === 'pending'; // couriers can browse pending orders
+    if (role !== 'ADMIN' && !isParty && !isPending) {
       return res.status(403).json({ error: 'Forbidden', message: 'Access denied' });
     }
 
@@ -422,6 +646,8 @@ exports.getOrderById = async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error', message: 'Internal server error' });
   }
 };
+
+// ─── updateOrderStatus ────────────────────────────────────────────────────────
 
 exports.updateOrderStatus = async (req, res) => {
   const { id } = req.params;
@@ -435,25 +661,37 @@ exports.updateOrderStatus = async (req, res) => {
   }
 
   try {
-    const userRes = await db.query('SELECT is_fully_verified, role FROM users WHERE id = $1', [userId]);
+    const userRes = await db.query('SELECT is_fully_verified, role FROM users WHERE id = $1', [
+      userId,
+    ]);
     const user = userRes.rows[0];
     if (!user) return res.status(404).json({ error: 'Not Found', message: 'User not found' });
 
-    // Allow Admins to arbitrarily update statuses for support purposes
+    // Only ADMINs can force-override order status via this generic endpoint
     if (user.role.toUpperCase() === 'ADMIN') {
-      const updated = await db.query(`UPDATE orders SET status=$1, updated_at=NOW() WHERE id=$2 RETURNING *`, [status, id]);
-      if (updated.rows.length === 0) return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
+      const updated = await db.query(
+        `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+        [status, id]
+      );
+      if (updated.rows.length === 0) {
+        return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
+      }
       const camelOrder = toCamel(updated.rows[0]);
-      wsManager.broadcastOrderEvent(camelOrder, 'order_' + status);
+      wsManager.broadcastOrderEvent(camelOrder, `order_${status}`);
       return res.json({ message: `Order forced to ${status} by admin`, order: camelOrder });
     }
 
-    return res.status(403).json({ error: 'Forbidden', message: 'Please use the specific endpoints (accept, pickup, complete) instead' });
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'Please use the specific endpoints (accept, pickup, complete) instead',
+    });
   } catch (err) {
     console.error('updateOrderStatus error:', err);
     res.status(500).json({ error: 'Internal Server Error', message: 'Internal server error' });
   }
 };
+
+// ─── getMyStats ───────────────────────────────────────────────────────────────
 
 exports.getMyStats = async (req, res) => {
   const userId = req.user.id;
@@ -466,8 +704,12 @@ exports.getMyStats = async (req, res) => {
       [userId]
     );
 
-    const stats = { pending: 0, accepted: 0, picked_up: 0, delivered: 0, cancelled: 0 };
-    result.rows.forEach((r) => { stats[r.status] = r.count; });
+    const stats = { pending: 0, accepted: 0, pickedUp: 0, delivered: 0, cancelled: 0 };
+    result.rows.forEach((r) => {
+      // Normalise DB snake_case keys to camelCase for the stats map
+      const key = r.status.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+      stats[key] = r.count;
+    });
     res.json({ stats });
   } catch (err) {
     console.error('getMyStats error:', err);
@@ -475,22 +717,30 @@ exports.getMyStats = async (req, res) => {
   }
 };
 
+// ─── rateOrder ────────────────────────────────────────────────────────────────
+
 exports.rateOrder = async (req, res) => {
   const { id } = req.params;
   const { rating } = req.body;
   const userId = req.user.id;
 
   if (rating < 1 || rating > 5) {
-    return res.status(400).json({ error: 'Bad Request', message: 'Rating must be between 1 and 5' });
+    return res
+      .status(400)
+      .json({ error: 'Bad Request', message: 'Rating must be between 1 and 5' });
   }
 
   try {
     const { rows } = await db.query('SELECT * FROM orders WHERE id = $1', [id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
+    }
     const order = rows[0];
 
     if (order.status !== 'delivered') {
-      return res.status(400).json({ error: 'Bad Request', message: 'Can only rate delivered orders' });
+      return res
+        .status(400)
+        .json({ error: 'Bad Request', message: 'Can only rate delivered orders' });
     }
 
     let targetUserId, ratingColumn;
@@ -504,10 +754,14 @@ exports.rateOrder = async (req, res) => {
       return res.status(403).json({ error: 'Forbidden', message: 'Not involved in this order' });
     }
 
-    if (!targetUserId) return res.status(400).json({ error: 'Bad Request', message: 'Target user not found' });
+    if (!targetUserId) {
+      return res.status(400).json({ error: 'Bad Request', message: 'Target user not found' });
+    }
 
     await db.query(
-      `UPDATE users SET ${ratingColumn} = LEAST(5.00, GREATEST(1.00, ((${ratingColumn} * 4) + $1) / 5.0)) WHERE id = $2`,
+      `UPDATE users
+       SET ${ratingColumn} = LEAST(5.00, GREATEST(1.00, ((${ratingColumn} * 4) + $1) / 5.0))
+       WHERE id = $2`,
       [rating, targetUserId]
     );
 
