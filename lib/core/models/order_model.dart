@@ -27,6 +27,9 @@ class OrderModel {
 
   // QR and Handoff
   final String? qrCodeSecureString;
+  /// Full QR payload returned by the server on order creation:
+  /// "ORDER:{id}|TOKEN:{qrCodeSecureString}"
+  final String? qrPayload;
   final DateTime? handoffEstimatedTime;
 
   // Cancel
@@ -67,6 +70,7 @@ class OrderModel {
     required this.totalPrice,
     this.suggestedPrice,
     this.qrCodeSecureString,
+    this.qrPayload,
     this.handoffEstimatedTime,
     this.cancelReason,
     required this.createdAt,
@@ -135,6 +139,7 @@ class OrderModel {
           ? double.tryParse(json['suggestedPrice'].toString())
           : null,
       qrCodeSecureString: json['qrCodeSecureString'] as String?,
+      qrPayload:          json['qrPayload'] as String?,
       handoffEstimatedTime: json['handoffEstimatedTime'] != null
           ? _parseDate(json['handoffEstimatedTime'])
           : null,

@@ -1,19 +1,8 @@
 const db = require('../db');
 const wsManager = require('../websocket');
 const crypto = require('crypto');
+// firebase-admin is initialized globally in server.js — just require it here.
 const admin = require('firebase-admin');
-const path = require('path');
-
-if (admin.getApps().length === 0) {
-  // Load credentials from the locally-placed, gitignored key file.
-  // Rename your newly-downloaded Firebase JSON to exactly: firebase-key.json
-  // and drop it in the backend-api/ directory — Git will ignore it automatically.
-  const serviceAccount = require(path.join(__dirname, '../firebase-key.json'));
-  admin.initializeApp({
-    credential: admin.cert(serviceAccount),
-    projectId: 'dakika0',
-  });
-}
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -53,6 +42,9 @@ const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
  */
 async function sendPushNotification(deviceToken, title, body) {
   try {
+    // ── Debug: confirm the token is reaching the notification step ──
+    console.log('[Push Notification Setup] Target Token:', deviceToken);
+
     const message = {
       notification: {
         title: title,

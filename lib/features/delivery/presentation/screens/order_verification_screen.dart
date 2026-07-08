@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/widgets/custom_widgets.dart';
 import '../../../orders/providers/order_provider.dart';
+import 'sender_qr_screen.dart';
 
 class OrderVerificationScreen extends ConsumerStatefulWidget {
   final String pickupAddress;
@@ -71,7 +72,7 @@ class _OrderVerificationScreenState extends ConsumerState<OrderVerificationScree
     setState(() => _isSubmitting = true);
     try {
       final repo = ref.read(orderRepositoryProvider);
-      await repo.createOrder(
+      final order = await repo.createOrder(
         pickupAddress: widget.pickupAddress,
         dropoffAddress: widget.dropoffAddress,
         itemType: widget.itemType,
@@ -88,47 +89,18 @@ class _OrderVerificationScreenState extends ConsumerState<OrderVerificationScree
       ref.invalidate(availableOrdersProvider);
 
       if (mounted) {
-        // ── ✅ Success Snackbar ───────────────────────────────────────────
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 4),
-            behavior: SnackBarBehavior.floating,
-            margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            backgroundColor: const Color(0xFF1E7D34),
-            content: const Row(
-              children: [
-                Text('🎉', style: TextStyle(fontSize: 22)),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Order Created Successfully!',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Your delivery has been broadcasted to nearby couriers.',
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+        // ── ✅ Navigate to the QR screen so the sender can show the courier ─
+        final qrToken = order.qrPayload ?? order.qrCodeSecureString ?? order.id;
+
+        // Pop the verification screen first, then push QR screen in its place
+        Navigator.pop(context); // back to request_delivery_screen
+        Navigator.pushReplacement(
+          // ignore: use_build_context_synchronously
+          context,
+          MaterialPageRoute(
+            builder: (_) => SenderQrScreen(trackingToken: qrToken),
           ),
         );
-        // Pop back to home (pop verification screen, then request screen)
-        Navigator.pop(context);
-        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {

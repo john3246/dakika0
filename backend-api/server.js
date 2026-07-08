@@ -8,6 +8,21 @@ const path = require('path');
 const http = require('http');
 const wsManager = require('./websocket');
 
+// ─── Firebase Admin: initialize ONCE globally before any route controllers load ─
+// Controllers simply require('firebase-admin') and call admin.messaging() —
+// the shared app instance created here will be reused automatically.
+const admin = require('firebase-admin');
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(
+      require('./firebase-key.json')
+    ),
+    projectId: 'dakika0',
+  });
+  console.log('[Firebase] Admin SDK initialized successfully.');
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
 const authRoutes = require('./routes/authRoutes');
 const profileRoutes = require('./routes/profileRoutes');
 const orderRoutes = require('./routes/orderRoutes');
@@ -70,7 +85,7 @@ testDBConnection();
 wsManager.initWebSocket(server);
 
 // Start Server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
