@@ -43,3 +43,13 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ─── Security: Firebase / GCP service-account credentials ────────────────────
+# Never commit service-account JSON files.
+# Place your renamed key (firebase-key.json) inside backend-api/ locally;
+# it will be ignored by Git automatically via the rule below.
+backend-api/*.json
+
+# Also ignore any env files that may carry secrets
+backend-api/.env
+.env

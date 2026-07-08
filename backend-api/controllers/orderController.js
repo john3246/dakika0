@@ -5,7 +5,10 @@ const admin = require('firebase-admin');
 const path = require('path');
 
 if (admin.getApps().length === 0) {
-  const serviceAccount = require(path.join(__dirname, '../dakika0-firebase-adminsdk-fbsvc-52a0e5b982.json'));
+  // Load credentials from the locally-placed, gitignored key file.
+  // Rename your newly-downloaded Firebase JSON to exactly: firebase-key.json
+  // and drop it in the backend-api/ directory — Git will ignore it automatically.
+  const serviceAccount = require(path.join(__dirname, '../firebase-key.json'));
   admin.initializeApp({
     credential: admin.cert(serviceAccount),
     projectId: 'dakika0',
