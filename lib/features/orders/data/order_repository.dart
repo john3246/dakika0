@@ -1,7 +1,3 @@
-// ─── features/orders/data/order_repository.dart ─────────────────────────────
-// Single source of truth for all order API calls.
-// Consumed by order_provider.dart — never called directly from screens.
-
 import 'package:dio/dio.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/models/order_model.dart';
@@ -12,7 +8,7 @@ class OrderRepository {
 
   const OrderRepository(this._apiClient);
 
-  // ── Create a new delivery order ──────────────────────────────────────────
+  //Create a new delivery order
   Future<OrderModel> createOrder({
     required String pickupAddress,
     required String dropoffAddress,
@@ -47,8 +43,7 @@ class OrderRepository {
     }
   }
 
-  // ── Get current user's orders, optionally filtered by status ───────────────
-  // statusFilter example: 'ACCEPTED,PICKED_UP'  or  null for all
+  // ── Get current user's orders, optionally filtered by status (PENDING, ACCEPTED, IN_TRANSIT, COMPLETED, CANCELLED) ─────────────
   Future<List<OrderModel>> getMyOrders({String? statusFilter}) async {
 
     try {
@@ -63,7 +58,7 @@ class OrderRepository {
     }
   }
 
-  // ── Get PENDING orders available for couriers to accept ──────────────────
+  //Get PENDING orders available for couriers to accept
   Future<List<OrderModel>> getAvailableOrders() async {
 
     try {
@@ -75,7 +70,7 @@ class OrderRepository {
     }
   }
 
-  // ── Get nearby PENDING/ACCEPTED orders using Geospatial Radius ──────────
+  //Get nearby PENDING/ACCEPTED orders using Geospatial Radius
   Future<List<OrderModel>> getNearbyOrders(double lat, double lng, {double radiusKm = 10.0}) async {
 
     try {
@@ -90,7 +85,7 @@ class OrderRepository {
     }
   }
 
-  // ── Get a single order by ID (with full courier/customer JOIN) ─────────
+  // Get a single order by ID (with full courier/customer JOIN)
   Future<OrderModel> getOrderById(String orderId) async {
     try {
       final response = await _apiClient.dio.get('${ApiConstants.ordersEndpoint}/$orderId');
@@ -100,7 +95,7 @@ class OrderRepository {
     }
   }
 
-  // ── Update order status (state machine) ────────────────────────────────
+  // ── Update order status (state machine)
   Future<OrderModel> updateStatus(String orderId, String status, {String? cancelReason}) async {
     try {
       final response = await _apiClient.dio.patch(
@@ -116,7 +111,7 @@ class OrderRepository {
     }
   }
 
-  // ── Pickup Order (QR Validation) ──────────────────────────────────────────
+  // ── Pickup Order (QR Validation)
   Future<OrderModel> pickupOrder(String orderId, String qrCode) async {
     try {
       final response = await _apiClient.dio.post(
@@ -129,7 +124,7 @@ class OrderRepository {
     }
   }
 
-  // ── Complete Order (QR Validation) ────────────────────────────────────────
+  // ── Complete Order (QR Validation)
   Future<OrderModel> completeOrder(String orderId, String qrCode) async {
     try {
       final response = await _apiClient.dio.post(
@@ -142,7 +137,7 @@ class OrderRepository {
     }
   }
 
-  // ── Get order count stats for the dashboard ──────────────────────────────
+  // ── Get order count stats for the dashboard
   Future<Map<String, int>> getMyStats() async {
 
     try {
@@ -154,7 +149,7 @@ class OrderRepository {
     }
   }
 
-  // ── Rate an order (customer or courier) ──────────────────────────────────
+  // ── Rate an order (customer or courier)
   Future<void> rateOrder(String orderId, double rating) async {
     try {
       await _apiClient.dio.post(

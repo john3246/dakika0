@@ -65,7 +65,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           final order = event['order'];
           final itemType = order['itemType'] ?? 'Delivery';
           final pickup = order['pickupAddress'] ?? '';
-          final price = (order['estimatedPrice'] as num?)?.toDouble() ?? 0.0;
+          final price = (order['estimatedPrice'] != null ? num.tryParse(order['estimatedPrice'].toString()) : null)?.toDouble() ?? 0.0;
           final orderId = order['id'] as String;
 
           NotificationOverlay.show(

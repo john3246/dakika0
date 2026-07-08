@@ -115,12 +115,12 @@ class OrderModel {
       status:         ((json['status'] as String?) ?? 'PENDING').toUpperCase(),
 
       pickupAddress:   (json['pickupAddress']  as String?) ?? '',
-      pickupLatitude:  (json['pickupLatitude']  as num?)?.toDouble() ?? 0.0,
-      pickupLongitude: (json['pickupLongitude'] as num?)?.toDouble() ?? 0.0,
+      pickupLatitude:  (json['pickupLatitude'] != null ? num.tryParse(json['pickupLatitude'].toString()) : null)?.toDouble() ?? 0.0,
+      pickupLongitude: (json['pickupLongitude'] != null ? num.tryParse(json['pickupLongitude'].toString()) : null)?.toDouble() ?? 0.0,
 
       dropoffAddress:   (json['dropoffAddress']   as String?) ?? '',
-      dropoffLatitude:  (json['dropoffLatitude']  as num?)?.toDouble() ?? 0.0,
-      dropoffLongitude: (json['dropoffLongitude'] as num?)?.toDouble() ?? 0.0,
+      dropoffLatitude:  (json['dropoffLatitude'] != null ? num.tryParse(json['dropoffLatitude'].toString()) : null)?.toDouble() ?? 0.0,
+      dropoffLongitude: (json['dropoffLongitude'] != null ? num.tryParse(json['dropoffLongitude'].toString()) : null)?.toDouble() ?? 0.0,
 
       itemType:         (json['itemType']        as String?) ?? 'Package',
       itemDescription:  json['itemDescription'] as String?,
@@ -156,8 +156,8 @@ class OrderModel {
           ? double.tryParse(json['courierRating'].toString())
           : null,
       courierIsVerified: json['courierIsVerified'] as bool?,
-      courierLatitude:   (json['courierLatitude']  as num?)?.toDouble(),
-      courierLongitude:  (json['courierLongitude'] as num?)?.toDouble(),
+      courierLatitude:   (json['courierLatitude'] != null ? num.tryParse(json['courierLatitude'].toString()) : null)?.toDouble(),
+      courierLongitude:  (json['courierLongitude'] != null ? num.tryParse(json['courierLongitude'].toString()) : null)?.toDouble(),
     );
   }
 }

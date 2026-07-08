@@ -1,6 +1,16 @@
 const db = require('../db');
 const wsManager = require('../websocket');
 const crypto = require('crypto');
+const admin = require('firebase-admin');
+const path = require('path');
+
+if (admin.getApps().length === 0) {
+  const serviceAccount = require(path.join(__dirname, '../dakika0-firebase-adminsdk-fbsvc-52a0e5b982.json'));
+  admin.initializeApp({
+    credential: admin.cert(serviceAccount),
+    projectId: 'dakika0',
+  });
+}
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -39,14 +49,19 @@ const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
  * contract this helper must honour.
  */
 async function sendPushNotification(deviceToken, title, body) {
-  // TODO: integrate FCM / APNs / Expo Push here.
-  // Example (FCM v1 REST):
-  //   const response = await fetch('https://fcm.googleapis.com/v1/projects/<id>/messages:send', {
-  //     method: 'POST',
-  //     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-  //     body: JSON.stringify({ message: { token: deviceToken, notification: { title, body } } }),
-  //   });
-  console.log(`[Push] → token=${deviceToken} title="${title}" body="${body}"`);
+  try {
+    const message = {
+      notification: {
+        title: title,
+        body: body,
+      },
+      token: deviceToken,
+    };
+    const response = await admin.messaging().send(message);
+    console.log('[Push] Successfully sent message:', response);
+  } catch (error) {
+    console.error('[Push] sendPushNotification failed locally:', error);
+  }
 }
 
 // ─── createOrder ─────────────────────────────────────────────────────────────

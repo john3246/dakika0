@@ -45,8 +45,8 @@ class _DeliveryDetailScreenState extends ConsumerState<DeliveryDetailScreen> {
     _wsSubscription = wsService.eventStream.listen((event) {
       if (event['type'] == 'delivery_location_update' &&
           event['orderId'] == widget.orderId) {
-        final lat = event['latitude'] as double?;
-        final lng = event['longitude'] as double?;
+        final lat = event['latitude'] != null ? double.tryParse(event['latitude'].toString()) : null;
+        final lng = event['longitude'] != null ? double.tryParse(event['longitude'].toString()) : null;
         if (lat != null && lng != null && mounted) {
           setState(() {
             _courierLatLng = LatLng(lat, lng);
