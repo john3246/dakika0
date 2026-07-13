@@ -11,12 +11,12 @@ const wsManager = require('./websocket');
 // ─── Firebase Admin: initialize ONCE globally before any route controllers load ─
 // Controllers simply require('firebase-admin') and call admin.messaging() —
 // the shared app instance created here will be reused automatically.
-const admin = require('firebase-admin');
+const { initializeApp, getApps } = require('firebase-admin/app');
+const { cert } = require('firebase-admin/app');
 
-// Added safe navigation (?.) to prevent the "Cannot read properties of undefined" error
-if (!admin.apps?.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(
+if (!getApps().length) {
+  initializeApp({
+    credential: cert(
       require('./firebase-key.json')
     ),
     projectId: 'dakika0',
