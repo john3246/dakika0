@@ -11,18 +11,35 @@ const wsManager = require('./websocket');
 // ─── Firebase Admin: initialize ONCE globally before any route controllers load ─
 // Controllers simply require('firebase-admin') and call admin.messaging() —
 // the shared app instance created here will be reused automatically.
+// ─── Firebase Admin: initialize ONCE globally before any route controllers load ─
 const { initializeApp, getApps } = require('firebase-admin/app');
 const { cert } = require('firebase-admin/app');
 
 if (!getApps().length) {
-  initializeApp({
-    credential: cert(
-      require('./firebase-key.json')
-    ),
-    projectId: 'dakika0',
-  });
-  console.log('[Firebase] Admin SDK initialized successfully.');
+  let serviceAccount;
+
+  // Use Render's environment variable if available, otherwise fall back to local file
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    try {
+      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } catch (e) {
+      console.error('[Firebase] Failed to parse FIREBASE_SERVICE_ACCOUNT env var:', e);
+    }
+  } else {
+    serviceAccount = require('./firebase-key.json');
+  }
+
+  if (serviceAccount) {
+    initializeApp({
+      credential: cert(serviceAccount),
+      projectId: 'dakika0',
+    });
+    console.log('[Firebase] Admin SDK initialized successfully.');
+  } else {
+    console.error('[Firebase] Critical: No service account credentials found.');
+  }
 }
+// ──────────────────────────────────────────────────────────────────────────────
 // ──────────────────────────────────────────────────────────────────────────────
 
 const authRoutes = require('./routes/authRoutes');
