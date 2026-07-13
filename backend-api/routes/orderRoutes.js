@@ -15,6 +15,8 @@ const {
   getMyStats,
   getNearbyOrders,
   rateOrder,
+  lockEscrow,
+  releaseEscrowPayment,
 } = require('../controllers/orderController');
 
 // All routes require a valid JWT
@@ -41,5 +43,11 @@ router.get('/nearby', getNearbyOrders);
 router.get('/:id', getOrderById);
 router.patch('/:id/status', updateOrderStatus);
 router.post('/:id/rate', rateOrder);
+
+// ── Escrow & Wallet ────────────────────────────────────────────────────────
+// Lock the order's total_price into escrow when a courier accepts the order
+router.post('/:id/escrow/lock', requireRole('CUSTOMER'), lockEscrow);
+// Release escrowed funds to the courier after delivery is confirmed
+router.post('/:id/escrow/release', releaseEscrowPayment);
 
 module.exports = router;

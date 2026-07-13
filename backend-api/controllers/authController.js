@@ -169,9 +169,10 @@ exports.login = async (req, res) => {
       }
     }
 
-    // ── CRITICAL CHANGE: 7-day expiration so Flutter stays authenticated ──
+    // ── CRITICAL CHANGE: 30-day expiration so Flutter stays authenticated
+    //    across extended delivery operations without forcing re-login ──
     const tokenPayload = { id: user.id, role: user.role };
-    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '30d' });
 
     res.json({
       message: 'Login successful',

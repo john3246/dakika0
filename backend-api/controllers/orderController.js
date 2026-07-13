@@ -59,6 +59,35 @@ async function sendPushNotification(deviceToken, title, body) {
   }
 }
 
+// ─── notifyOrderCreator ──────────────────────────────────────────────────────
+// Convenience wrapper: looks up the order creator's device_token and fires an
+// FCM push notification reporting the new order status.
+// Always wraps in try/catch — a missed notification must never block a response.
+async function notifyOrderCreator(orderId, newStatus) {
+  try {
+    const res = await db.query(
+      `SELECT u.device_token, u.name
+       FROM orders o
+       JOIN users u ON u.id = o.creator_id
+       WHERE o.id = $1`,
+      [orderId]
+    );
+    const row = res.rows[0];
+    if (!row?.device_token) {
+      console.log(`[Push] notifyOrderCreator: no device_token for order ${orderId}`);
+      return;
+    }
+    const statusLabel = newStatus.charAt(0) + newStatus.slice(1).toLowerCase().replace('_', ' ');
+    await sendPushNotification(
+      row.device_token,
+      'Delivery Update 🚚',
+      `Your order status has changed to: ${statusLabel}`
+    );
+  } catch (err) {
+    console.error('[Push] notifyOrderCreator failed (non-fatal):', err.message);
+  }
+}
+
 // ─── createOrder ─────────────────────────────────────────────────────────────
 //
 // FIX #4 — REORDER CREATION CRASH
@@ -276,6 +305,9 @@ exports.acceptOrder = async (req, res) => {
     const updatedOrder = toCamel(updateRes.rows[0]);
     wsManager.broadcastOrderEvent(updatedOrder, 'order_accepted');
 
+    // ── Notify the sender their order has been accepted ──
+    notifyOrderCreator(orderId, 'ACCEPTED');
+
     res.json({ message: 'Order accepted successfully', order: updatedOrder });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -351,6 +383,9 @@ exports.pickupOrder = async (req, res) => {
     const updatedOrder = toCamel(updateRes.rows[0]);
     wsManager.broadcastOrderEvent(updatedOrder, 'order_picked_up');
 
+    // ── Notify the sender their package has been picked up ──
+    notifyOrderCreator(orderId, 'PICKED_UP');
+
     res.json({ message: 'Order picked up successfully', order: updatedOrder });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -421,6 +456,9 @@ exports.completeOrder = async (req, res) => {
 
     const updatedOrder = toCamel(updateRes.rows[0]);
     wsManager.broadcastOrderEvent(updatedOrder, 'order_delivered');
+
+    // ── Notify the sender their package has been delivered ──
+    notifyOrderCreator(orderId, 'DELIVERED');
 
     res.json({ message: 'Order completed and delivered successfully', order: updatedOrder });
   } catch (err) {
@@ -783,3 +821,239 @@ exports.rateOrder = async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error', message: 'Internal server error' });
   }
 };
+
+// ─── lockEscrow ───────────────────────────────────────────────────────────────
+//
+// Called when an order is accepted by a courier.  Verifies the sender has
+// sufficient wallet funds, then atomically moves the order's total_price from
+// the sender's wallet into the order's escrow_balance column.
+//
+// POST /api/orders/:id/escrow/lock
+// ─────────────────────────────────────────────────────────────────────────────
+exports.lockEscrow = async (req, res) => {
+  const orderId   = req.params.id;
+  const senderId  = req.user.id;
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Fetch the order and verify ownership + status
+    const orderRes = await client.query(
+      'SELECT * FROM orders WHERE id = $1 FOR UPDATE',
+      [orderId]
+    );
+    if (orderRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
+    }
+    const order = orderRes.rows[0];
+
+    if (order.creator_id !== senderId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Forbidden', message: 'Only the order creator can lock escrow' });
+    }
+
+    if (order.status !== 'accepted') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Escrow can only be locked on an accepted order',
+      });
+    }
+
+    if (parseFloat(order.escrow_balance) > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Conflict', message: 'Escrow already locked for this order' });
+    }
+
+    const amount = parseFloat(order.total_price);
+
+    // 2. Upsert sender wallet (create with 0 balance if first time)
+    await client.query(
+      `INSERT INTO wallets (user_id, balance) VALUES ($1, 0)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [senderId]
+    );
+
+    // 3. Check sufficient balance
+    const walletRes = await client.query(
+      'SELECT balance FROM wallets WHERE user_id = $1 FOR UPDATE',
+      [senderId]
+    );
+    const senderBalance = parseFloat(walletRes.rows[0]?.balance ?? 0);
+    if (senderBalance < amount) {
+      await client.query('ROLLBACK');
+      return res.status(402).json({
+        error: 'Payment Required',
+        message: `Insufficient wallet balance. Required: TZS ${amount}, Available: TZS ${senderBalance}`,
+      });
+    }
+
+    // 4. Deduct from sender wallet
+    await client.query(
+      'UPDATE wallets SET balance = balance - $1, updated_at = NOW() WHERE user_id = $2',
+      [amount, senderId]
+    );
+
+    // 5. Lock amount into order escrow_balance
+    await client.query(
+      'UPDATE orders SET escrow_balance = $1, updated_at = NOW() WHERE id = $2',
+      [amount, orderId]
+    );
+
+    // 6. Log the hold in wallet_ledger
+    const senderWalletRes = await client.query('SELECT id FROM wallets WHERE user_id = $1', [senderId]);
+    const senderWalletId  = senderWalletRes.rows[0].id;
+    const balanceAfter    = senderBalance - amount;
+
+    await client.query(
+      `INSERT INTO wallet_ledger
+         (wallet_id, transaction_type, amount, reference_type, reference_id, balance_after)
+       VALUES ($1, 'hold', $2, 'order', $3, $4)`,
+      [senderWalletId, amount, orderId, balanceAfter]
+    );
+
+    await client.query('COMMIT');
+
+    console.log(`[Escrow] Locked TZS ${amount} for order ${orderId}`);
+    return res.json({
+      success: true,
+      message: `TZS ${amount} locked in escrow for order ${orderId}`,
+      escrowBalance: amount,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('lockEscrow error:', err);
+    return res.status(500).json({ error: 'Internal Server Error', message: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+};
+
+// ─── releaseEscrowPayment ─────────────────────────────────────────────────────
+//
+// Atomically releases the escrowed funds to the courier upon verified delivery.
+// This is the most financially critical endpoint — every step is inside a single
+// DB transaction; any fault triggers ROLLBACK.
+//
+// Sequence (must succeed entirely or not at all):
+//   1. Verify order is in 'delivered' status
+//   2. Verify escrow_balance > 0
+//   3. Zero the order's escrow_balance
+//   4. Upsert courier wallet, credit the payout
+//   5. Write immutable wallet_ledger audit row
+//   6. COMMIT
+//
+// POST /api/orders/:id/escrow/release  (ADMIN or COURIER role)
+// ─────────────────────────────────────────────────────────────────────────────
+exports.releaseEscrowPayment = async (req, res) => {
+  const orderId  = req.params.id;
+  const callerId = req.user.id;
+  const callerRole = req.user.role;
+
+  const client = await db.getClient();
+  try {
+    await client.query('BEGIN');
+
+    // ── Step 1: Fetch and lock the order row ──────────────────────────────────
+    const orderRes = await client.query(
+      'SELECT * FROM orders WHERE id = $1 FOR UPDATE',
+      [orderId]
+    );
+    if (orderRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Not Found', message: 'Order not found' });
+    }
+    const order = orderRes.rows[0];
+
+    // Only the assigned courier or an admin may trigger release
+    if (callerRole !== 'ADMIN' && order.courier_id !== callerId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Forbidden', message: 'Not authorised to release this escrow' });
+    }
+
+    // ── Step 2: Delivery must be confirmed ────────────────────────────────────
+    if (order.status !== 'delivered') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Conflict',
+        message: `Cannot release escrow: order status is '${order.status}', must be 'delivered'`,
+      });
+    }
+
+    const escrowAmount = parseFloat(order.escrow_balance ?? 0);
+    if (escrowAmount <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'No escrow funds to release for this order',
+      });
+    }
+
+    const courierId = order.courier_id;
+
+    // ── Step 3: Zero the escrow balance on the order ──────────────────────────
+    await client.query(
+      'UPDATE orders SET escrow_balance = 0, updated_at = NOW() WHERE id = $1',
+      [orderId]
+    );
+
+    // ── Step 4: Upsert courier wallet and credit payout ───────────────────────
+    await client.query(
+      `INSERT INTO wallets (user_id, balance) VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE
+         SET balance     = wallets.balance + EXCLUDED.balance,
+             updated_at  = NOW()`,
+      [courierId, escrowAmount]
+    );
+
+    // ── Step 5: Write immutable audit entry to wallet_ledger ──────────────────
+    const courierWalletRes = await client.query(
+      'SELECT id, balance FROM wallets WHERE user_id = $1',
+      [courierId]
+    );
+    const courierWalletId = courierWalletRes.rows[0].id;
+    const balanceAfter    = parseFloat(courierWalletRes.rows[0].balance);
+
+    await client.query(
+      `INSERT INTO wallet_ledger
+         (wallet_id, transaction_type, amount, reference_type, reference_id, balance_after)
+       VALUES ($1, 'credit', $2, 'order', $3, $4)`,
+      [courierWalletId, escrowAmount, orderId, balanceAfter]
+    );
+
+    // ── Step 6: COMMIT ─────────────────────────────────────────────────────────
+    await client.query('COMMIT');
+
+    console.log(`[Escrow] Released TZS ${escrowAmount} to courier ${courierId} for order ${orderId}`);
+
+    // Fire non-blocking push to courier
+    try {
+      const tokenRes = await db.query('SELECT device_token FROM users WHERE id = $1', [courierId]);
+      const token = tokenRes.rows[0]?.device_token;
+      if (token) {
+        await sendPushNotification(
+          token,
+          'Payment Received 💰',
+          `TZS ${escrowAmount.toLocaleString()} has been credited to your wallet!`
+        );
+      }
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      message: `TZS ${escrowAmount} released to courier successfully`,
+      courierId,
+      amountPaid: escrowAmount,
+      newBalance: balanceAfter,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('releaseEscrowPayment error:', err);
+    return res.status(500).json({ error: 'Internal Server Error', message: 'Internal server error' });
+  } finally {
+    client.release();
+  }
+};
+

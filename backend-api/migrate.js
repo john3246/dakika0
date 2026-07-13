@@ -48,7 +48,9 @@ async function migrate() {
       ADD COLUMN IF NOT EXISTS item_type VARCHAR(255),
       ADD COLUMN IF NOT EXISTS item_description TEXT,
       ADD COLUMN IF NOT EXISTS package_weight_kg NUMERIC(10, 2),
-      ADD COLUMN IF NOT EXISTS suggested_price NUMERIC(10, 2) CHECK (suggested_price >= 0);
+      ADD COLUMN IF NOT EXISTS suggested_price NUMERIC(10, 2) CHECK (suggested_price >= 0),
+      ADD COLUMN IF NOT EXISTS escrow_balance NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (escrow_balance >= 0),
+      ADD COLUMN IF NOT EXISTS cancel_reason TEXT;
     `);
 
     // Create all other tables from merged schema if they don't exist

@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../data/profile_repository.dart';
 
@@ -50,9 +52,29 @@ class ProfileNotifier extends AutoDisposeAsyncNotifier<Map<String, dynamic>> {
     try {
       final repo = ref.read(profileRepositoryProvider);
       final url = await repo.uploadDocument(file, type: 'profile');
+
+      // ── Update in-memory state ──────────────────────────────────────────────
       final updatedData = Map<String, dynamic>.from(state.value ?? {});
       updatedData['profileImageUrl'] = url;
       state = AsyncValue.data(updatedData);
+
+      // ── Persist to SharedPreferences so the avatar survives app restarts ───
+      // We merge the new URL into the cached user_json so currentUserProvider
+      // will return the correct image on the very next cold start without a
+      // network round-trip.
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final raw = prefs.getString('user_json');
+        if (raw != null) {
+          final userMap = Map<String, dynamic>.from(
+            jsonDecode(raw) as Map<String, dynamic>,
+          );
+          userMap['profileImageUrl'] = url;
+          await prefs.setString('user_json', jsonEncode(userMap));
+        }
+      } catch (_) {
+        // SharedPrefs write failure is non-fatal — in-memory state is already updated.
+      }
     } catch (e) {
       rethrow;
     }

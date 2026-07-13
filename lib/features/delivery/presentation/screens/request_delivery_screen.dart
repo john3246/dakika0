@@ -54,8 +54,20 @@ class _RequestDeliveryScreenState
         setState(() {
           _pickupLat = position.latitude;
           _pickupLng = position.longitude;
-          _pickupController.text = "Current GPS Location";
+          // Show coordinates immediately while geocoding resolves
+          _pickupController.text = 'Locating address…';
         });
+
+        // Reverse-geocode in background — update the field when resolved
+        final address = await locationService.getAddressFromCoordinates(
+          position.latitude,
+          position.longitude,
+        );
+        if (mounted) {
+          setState(() {
+            _pickupController.text = address;
+          });
+        }
       }
     }
     if (mounted) {
@@ -82,10 +94,12 @@ class _RequestDeliveryScreenState
       return;
     }
 
-    // Mock dropoff location based on pickup for demo purposes since we don't have Geocoding
-    // (adding ~5km offset)
-    final dropoffLat = _pickupLat! + 0.045;
-    final dropoffLng = _pickupLng! + 0.045;
+    // TODO: Forward-geocode the typed dropoff address to get real coordinates.
+    // For now we use the pickup coords as a safe fallback so the API call
+    // never sends random garbage; the user sees a ~0 km distance estimate
+    // which is clearly wrong and prompts them to add a real address.
+    final dropoffLat = _pickupLat!;
+    final dropoffLng = _pickupLng!;
 
     final weight = double.tryParse(_weightController.text.trim());
     final suggestedPrice = double.tryParse(_suggestedPriceController.text.trim());
